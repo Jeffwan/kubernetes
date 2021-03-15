@@ -155,7 +155,8 @@ filegroup(
     name = "test-targets",
     srcs = select(for_platforms(
         for_server = [
-            "//cmd/kubemark",
+            "//cmd/kubemark/hollow-kubelet",
+            "//cmd/kubemark/hollow-proxy",
             "//test/e2e_node:e2e_node.test",
         ],
         for_test = [

@@ -5,8 +5,8 @@ load("@io_bazel_rules_docker//container:container.bzl", "container_image", "cont
 container_image(
     name = "image",
     base = "@distroless_base//image",
-    entrypoint = ["/kubemark"],
-    files = ["//cmd/kubemark"],
+    entrypoint = ["/hollow-kubelet"],
+    files = ["//cmd/kubemark/hollow-kubelet", "//cmd/kubemark/hollow-proxy"],
     stamp = True,
 )
 

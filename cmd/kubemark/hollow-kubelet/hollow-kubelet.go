@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors.
+Copyright 2021 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"errors"
 	goflag "flag"
 	"fmt"
 	"math/rand"
@@ -28,19 +27,15 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/record"
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
 	_ "k8s.io/component-base/metrics/prometheus/restclient" // for client metric registration
 	_ "k8s.io/component-base/metrics/prometheus/version"    // for version metric registration
 	"k8s.io/component-base/version"
 	"k8s.io/component-base/version/verflag"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/cluster/ports"
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
@@ -48,53 +43,41 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cri/remote"
 	fakeremote "k8s.io/kubernetes/pkg/kubelet/cri/remote/fake"
 	"k8s.io/kubernetes/pkg/kubemark"
-	fakeiptables "k8s.io/kubernetes/pkg/util/iptables/testing"
-	fakesysctl "k8s.io/kubernetes/pkg/util/sysctl/testing"
 	utiltaints "k8s.io/kubernetes/pkg/util/taints"
-	fakeexec "k8s.io/utils/exec/testing"
 )
 
-type hollowNodeConfig struct {
-	KubeconfigPath       string
-	KubeletPort          int
-	KubeletReadOnlyPort  int
-	Morph                string
-	NodeName             string
-	ServerPort           int
-	ContentType          string
-	UseRealProxier       bool
-	ProxierSyncPeriod    time.Duration
-	ProxierMinSyncPeriod time.Duration
-	NodeLabels           map[string]string
-	RegisterWithTaints   []core.Taint
+type hollowKubeletConfig struct {
+	KubeconfigPath      string
+	KubeletPort         int
+	KubeletReadOnlyPort int
+	Morph               string
+	NodeName            string
+	ServerPort          int
+	ContentType         string
+	NodeLabels          map[string]string
+	RegisterWithTaints  []core.Taint
 }
 
 const (
-	maxPods     = 110
-	podsPerCore = 0
+	maxPods            = 110
+	podsPerCore        = 0
+	defaultClientQps   = 10
+	defaultClientBurst = 20
 )
 
-// TODO(#45650): Refactor hollow-node into hollow-kubelet and hollow-proxy
-// and make the config driven.
-var knownMorphs = sets.NewString("kubelet", "proxy")
-
-func (c *hollowNodeConfig) addFlags(fs *pflag.FlagSet) {
+func (c *hollowKubeletConfig) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KubeconfigPath, "kubeconfig", "/kubeconfig/kubeconfig", "Path to kubeconfig file.")
 	fs.IntVar(&c.KubeletPort, "kubelet-port", ports.KubeletPort, "Port on which HollowKubelet should be listening.")
 	fs.IntVar(&c.KubeletReadOnlyPort, "kubelet-read-only-port", ports.KubeletReadOnlyPort, "Read-only port on which Kubelet is listening.")
 	fs.StringVar(&c.NodeName, "name", "fake-node", "Name of this Hollow Node.")
 	fs.IntVar(&c.ServerPort, "api-server-port", 443, "Port on which API server is listening.")
-	fs.StringVar(&c.Morph, "morph", "", fmt.Sprintf("Specifies into which Hollow component this binary should morph. Allowed values: %v", knownMorphs.List()))
 	fs.StringVar(&c.ContentType, "kube-api-content-type", "application/vnd.kubernetes.protobuf", "ContentType of requests sent to apiserver.")
-	fs.BoolVar(&c.UseRealProxier, "use-real-proxier", true, "Set to true if you want to use real proxier inside hollow-proxy.")
-	fs.DurationVar(&c.ProxierSyncPeriod, "proxier-sync-period", 30*time.Second, "Period that proxy rules are refreshed in hollow-proxy.")
-	fs.DurationVar(&c.ProxierMinSyncPeriod, "proxier-min-sync-period", 0, "Minimum period that proxy rules are refreshed in hollow-proxy.")
 	bindableNodeLabels := cliflag.ConfigurationMap(c.NodeLabels)
 	fs.Var(&bindableNodeLabels, "node-labels", "Additional node labels")
 	fs.Var(utiltaints.NewTaintsVar(&c.RegisterWithTaints), "register-with-taints", "Register the node with the given list of taints (comma separated \"<key>=<value>:<effect>\"). No-op if register-node is false.")
 }
 
-func (c *hollowNodeConfig) createClientConfigFromFile() (*restclient.Config, error) {
+func (c *hollowKubeletConfig) createClientConfigFromFile() (*restclient.Config, error) {
 	clientConfig, err := clientcmd.LoadFromFile(c.KubeconfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("error while loading kubeconfig from file %v: %v", c.KubeconfigPath, err)
@@ -104,12 +87,12 @@ func (c *hollowNodeConfig) createClientConfigFromFile() (*restclient.Config, err
 		return nil, fmt.Errorf("error while creating kubeconfig: %v", err)
 	}
 	config.ContentType = c.ContentType
-	config.QPS = 10
-	config.Burst = 20
+	config.QPS = defaultClientQps
+	config.Burst = defaultClientBurst
 	return config, nil
 }
 
-func (c *hollowNodeConfig) createHollowKubeletOptions() *kubemark.HollowKubletOptions {
+func (c *hollowKubeletConfig) createHollowKubeletOptions() *kubemark.HollowKubletOptions {
 	return &kubemark.HollowKubletOptions{
 		NodeName:            c.NodeName,
 		KubeletPort:         c.KubeletPort,
@@ -124,7 +107,7 @@ func (c *hollowNodeConfig) createHollowKubeletOptions() *kubemark.HollowKubletOp
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	command := newHollowNodeCommand()
+	command := newHollowKubeletCommand()
 
 	// TODO: once we switch everything over to Cobra commands, we can go back to calling
 	// cliflag.InitFlags() (by removing its pflag.Parse() call). For now, we have to set the
@@ -141,17 +124,18 @@ func main() {
 }
 
 // newControllerManagerCommand creates a *cobra.Command object with default parameters
-func newHollowNodeCommand() *cobra.Command {
-	s := &hollowNodeConfig{
+func newHollowKubeletCommand() *cobra.Command {
+	s := &hollowKubeletConfig{
 		NodeLabels: make(map[string]string),
 	}
 
+	// TODO: do we need to custom Use and Long
 	cmd := &cobra.Command{
-		Use:  "kubemark",
-		Long: "kubemark",
+		Use:  "hollow-kubelet",
+		Long: "hollow-kubelet pretends to be an ordinary kubelet but doesn't start any containers or mount any volumes",
 		Run: func(cmd *cobra.Command, args []string) {
 			verflag.PrintAndExitIfRequested()
-			run(s)
+			runHollowKubelet(s)
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			for _, arg := range args {
@@ -167,13 +151,9 @@ func newHollowNodeCommand() *cobra.Command {
 	return cmd
 }
 
-func run(config *hollowNodeConfig) {
+func runHollowKubelet(config *hollowKubeletConfig) {
 	// To help debugging, immediately log version
 	klog.Infof("Version: %+v", version.Get())
-
-	if !knownMorphs.Has(config.Morph) {
-		klog.Fatalf("Unknown morph: %v. Allowed values: %v", config.Morph, knownMorphs.List())
-	}
 
 	// create a client to communicate with API server.
 	clientConfig, err := config.createClientConfigFromFile()
@@ -186,83 +166,49 @@ func run(config *hollowNodeConfig) {
 		klog.Fatalf("Failed to create a ClientSet: %v. Exiting.", err)
 	}
 
-	if config.Morph == "kubelet" {
-		f, c := kubemark.GetHollowKubeletConfig(config.createHollowKubeletOptions())
+	f, c := kubemark.GetHollowKubeletConfig(config.createHollowKubeletOptions())
 
-		heartbeatClientConfig := *clientConfig
-		heartbeatClientConfig.Timeout = c.NodeStatusUpdateFrequency.Duration
-		// The timeout is the minimum of the lease duration and status update frequency
-		leaseTimeout := time.Duration(c.NodeLeaseDurationSeconds) * time.Second
-		if heartbeatClientConfig.Timeout > leaseTimeout {
-			heartbeatClientConfig.Timeout = leaseTimeout
-		}
-
-		heartbeatClientConfig.QPS = float32(-1)
-		heartbeatClient, err := clientset.NewForConfig(&heartbeatClientConfig)
-		if err != nil {
-			klog.Fatalf("Failed to create a ClientSet: %v. Exiting.", err)
-		}
-
-		cadvisorInterface := &cadvisortest.Fake{
-			NodeName: config.NodeName,
-		}
-		containerManager := cm.NewStubContainerManager()
-
-		endpoint, err := fakeremote.GenerateEndpoint()
-		if err != nil {
-			klog.Fatalf("Failed to generate fake endpoint %v.", err)
-		}
-		fakeRemoteRuntime := fakeremote.NewFakeRemoteRuntime()
-		if err = fakeRemoteRuntime.Start(endpoint); err != nil {
-			klog.Fatalf("Failed to start fake runtime %v.", err)
-		}
-		defer fakeRemoteRuntime.Stop()
-		runtimeService, err := remote.NewRemoteRuntimeService(endpoint, 15*time.Second)
-		if err != nil {
-			klog.Fatalf("Failed to init runtime service %v.", err)
-		}
-
-		hollowKubelet := kubemark.NewHollowKubelet(
-			f, c,
-			client,
-			heartbeatClient,
-			cadvisorInterface,
-			fakeRemoteRuntime.ImageService,
-			runtimeService,
-			containerManager,
-		)
-		hollowKubelet.Run()
+	heartbeatClientConfig := *clientConfig
+	heartbeatClientConfig.Timeout = c.NodeStatusUpdateFrequency.Duration
+	// The timeout is the minimum of the lease duration and status update frequency
+	leaseTimeout := time.Duration(c.NodeLeaseDurationSeconds) * time.Second
+	if heartbeatClientConfig.Timeout > leaseTimeout {
+		heartbeatClientConfig.Timeout = leaseTimeout
 	}
 
-	if config.Morph == "proxy" {
-		client, err := clientset.NewForConfig(clientConfig)
-		if err != nil {
-			klog.Fatalf("Failed to create API Server client: %v", err)
-		}
-		iptInterface := fakeiptables.NewFake()
-		sysctl := fakesysctl.NewFake()
-		execer := &fakeexec.FakeExec{
-			LookPathFunc: func(_ string) (string, error) { return "", errors.New("fake execer") },
-		}
-		eventBroadcaster := record.NewBroadcaster()
-		recorder := eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: "kube-proxy", Host: config.NodeName})
-
-		hollowProxy, err := kubemark.NewHollowProxyOrDie(
-			config.NodeName,
-			client,
-			client.CoreV1(),
-			iptInterface,
-			sysctl,
-			execer,
-			eventBroadcaster,
-			recorder,
-			config.UseRealProxier,
-			config.ProxierSyncPeriod,
-			config.ProxierMinSyncPeriod,
-		)
-		if err != nil {
-			klog.Fatalf("Failed to create hollowProxy instance: %v", err)
-		}
-		hollowProxy.Run()
+	heartbeatClientConfig.QPS = float32(-1)
+	heartbeatClient, err := clientset.NewForConfig(&heartbeatClientConfig)
+	if err != nil {
+		klog.Fatalf("Failed to create a ClientSet: %v. Exiting.", err)
 	}
+
+	cadvisorInterface := &cadvisortest.Fake{
+		NodeName: config.NodeName,
+	}
+	containerManager := cm.NewStubContainerManager()
+
+	endpoint, err := fakeremote.GenerateEndpoint()
+	if err != nil {
+		klog.Fatalf("Failed to generate fake endpoint %v.", err)
+	}
+	fakeRemoteRuntime := fakeremote.NewFakeRemoteRuntime()
+	if err = fakeRemoteRuntime.Start(endpoint); err != nil {
+		klog.Fatalf("Failed to start fake runtime %v.", err)
+	}
+	defer fakeRemoteRuntime.Stop()
+	runtimeService, err := remote.NewRemoteRuntimeService(endpoint, 15*time.Second)
+	if err != nil {
+		klog.Fatalf("Failed to init runtime service %v.", err)
+	}
+
+	hollowKubelet := kubemark.NewHollowKubelet(
+		f, c,
+		client,
+		heartbeatClient,
+		cadvisorInterface,
+		fakeRemoteRuntime.ImageService,
+		runtimeService,
+		containerManager,
+	)
+	hollowKubelet.Run()
 }

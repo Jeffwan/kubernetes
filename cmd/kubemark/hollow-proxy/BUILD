@@ -7,14 +7,14 @@ load(
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_binary(
-    name = "kubemark",
+    name = "hollow-proxy",
     embed = [":go_default_library"],
 )
 
 go_library(
     name = "go_default_library",
-    srcs = ["hollow-node.go"],
-    importpath = "k8s.io/kubernetes/cmd/kubemark",
+    srcs = ["hollow-proxy.go"],
+    importpath = "k8s.io/kubernetes/cmd/kubemark/hollow-proxy",
     deps = [
         "//pkg/api/legacyscheme:go_default_library",
         "//pkg/apis/core:go_default_library",
