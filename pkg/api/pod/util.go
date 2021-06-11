@@ -620,6 +620,15 @@ func dropDisabledFields(
 	}
 
 	dropDisabledPodAffinityTermFields(podSpec, oldPodSpec)
+
+	if !utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) && !inPlacePodUpdateInUse(oldPodSpec) {
+		// Drop ResourcesAllocated and ResizePolicy fields. Don't drop updates to Resources field because
+		// template spec Resources field is mutable for certain controllers. Let ValidatePodUpdate handle it.
+		for i := range podSpec.Containers {
+			podSpec.Containers[i].ResourcesAllocated = nil
+			podSpec.Containers[i].ResizePolicy = nil
+		}
+	}
 }
 
 // dropDisabledProcMountField removes disabled fields from PodSpec related
@@ -911,6 +920,24 @@ func multiplePodIPsInUse(podStatus *api.PodStatus) bool {
 		return true
 	}
 	return false
+}
+
+// inPlacePodUpdateInUse return true if the pod spec is non-nil and has ResizePolicy and ResourcesAllocated set
+func inPlacePodUpdateInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+
+	var inUse bool
+	VisitContainers(podSpec, AllContainers, func(c *api.Container, containerType ContainerType) (shouldContinue bool) {
+		if len(c.ResourcesAllocated) > 0 || len(c.ResizePolicy) > 0 {
+			inUse = true
+			return false
+		}
+		return false
+	})
+
+	return inUse
 }
 
 // SeccompAnnotationForField takes a pod seccomp profile field and returns the

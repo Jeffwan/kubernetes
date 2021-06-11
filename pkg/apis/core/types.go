@@ -2056,6 +2056,33 @@ const (
 	PreemptNever PreemptionPolicy = "Never"
 )
 
+// ContainerResizePolicy specifies user guidance on how container resource resize should be handled.
+// Only one of the following container resize policies may be specified.
+// If none of the following policies is specified, it defaults to NoRestart.
+type ContainerResizePolicy string
+
+// These are the valid container resize policies:
+// NoRestart policy tells Kubelet to call UpdateContainerResources CRI API to resize
+// the resources without restarting the container, if possible. This is the default behavior.
+// RestartContainer policy tells Kubelet to stop and start the container with when
+// new resources are applied. This is needed for legacy applications e.g. java apps
+// using -xmxN flag which are unable to use the resized memory without restarting.
+const (
+	// Resize the container in-place without restarting it.
+	NoRestart ContainerResizePolicy = "NoRestart"
+	// Resize the container in-place by restarting it after resize.
+	RestartContainer ContainerResizePolicy = "RestartContainer"
+)
+
+// ResizePolicy represents the resource resize policy for a single container.
+type ResizePolicy struct {
+	// Name of the resource type to which this resize policy applies.
+	// Supported values: cpu, memory.
+	ResourceName ResourceName
+	// Container resize policy applicable to the above resource.
+	Policy ContainerResizePolicy
+}
+
 // TerminationMessagePolicy describes how termination messages are retrieved from a container.
 type TerminationMessagePolicy string
 
@@ -2135,6 +2162,12 @@ type Container struct {
 	// Compute resource requirements.
 	// +optional
 	Resources ResourceRequirements
+	// Node compute resources allocated to the container
+	// +optional
+	ResourcesAllocated ResourceList
+	// Resources resize policy for the container.
+	// +optional
+	ResizePolicy []ResizePolicy
 	// +optional
 	VolumeMounts []VolumeMount
 	// volumeDevices is the list of block devices to be used by the container.
@@ -2285,6 +2318,9 @@ type ContainerStatus struct {
 	// +optional
 	ContainerID string
 	Started     *bool
+	// Compute resource requests and limits applied to the container.
+	// +optional
+	Resources ResourceRequirements
 }
 
 // PodPhase is a label for the condition of a pod at the current time.
@@ -3116,6 +3152,12 @@ type EphemeralContainerCommon struct {
 	// already allocated to the pod.
 	// +optional
 	Resources ResourceRequirements
+	// Node compute resources are not allocated for ephemeral containers, they use spare resources.
+	// +optional
+	ResourcesAllocated ResourceList
+	// Resources resize policy is not applicable to ephemeral containers.
+	// +optional
+	ResizePolicy []ResizePolicy
 	// +optional
 	VolumeMounts []VolumeMount
 	// volumeDevices is the list of block devices to be used by the container.

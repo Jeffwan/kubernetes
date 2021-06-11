@@ -41,6 +41,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/noderestriction"
 	"k8s.io/kubernetes/plugin/pkg/admission/nodetaint"
 	"k8s.io/kubernetes/plugin/pkg/admission/podnodeselector"
+	"k8s.io/kubernetes/plugin/pkg/admission/podresourceallocation"
 	"k8s.io/kubernetes/plugin/pkg/admission/podtolerationrestriction"
 	podpriority "k8s.io/kubernetes/plugin/pkg/admission/priority"
 	"k8s.io/kubernetes/plugin/pkg/admission/runtimeclass"
@@ -96,10 +97,11 @@ var AllOrderedPlugins = []string{
 	// new admission plugins should generally be inserted above here
 	// webhook, resourcequota, and deny plugins must go at the end
 
-	mutatingwebhook.PluginName,   // MutatingAdmissionWebhook
-	validatingwebhook.PluginName, // ValidatingAdmissionWebhook
-	resourcequota.PluginName,     // ResourceQuota
-	deny.PluginName,              // AlwaysDeny
+	mutatingwebhook.PluginName,       // MutatingAdmissionWebhook
+	validatingwebhook.PluginName,     // ValidatingAdmissionWebhook
+	podresourceallocation.PluginName, // PodResourceAllocation
+	resourcequota.PluginName,         // ResourceQuota
+	deny.PluginName,                  // AlwaysDeny
 }
 
 // RegisterAllAdmissionPlugins registers all admission plugins and
@@ -123,6 +125,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	nodetaint.Register(plugins)
 	label.Register(plugins) // DEPRECATED, future PVs should not rely on labels for zone topology
 	podnodeselector.Register(plugins)
+	podresourceallocation.Register(plugins)
 	podtolerationrestriction.Register(plugins)
 	runtimeclass.Register(plugins)
 	resourcequota.Register(plugins)
@@ -149,6 +152,7 @@ func DefaultOffAdmissionPlugins() sets.String {
 		defaulttolerationseconds.PluginName,     // DefaultTolerationSeconds
 		mutatingwebhook.PluginName,              // MutatingAdmissionWebhook
 		validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
+		podresourceallocation.PluginName,        // PodResourceAllocation
 		resourcequota.PluginName,                // ResourceQuota
 		storageobjectinuseprotection.PluginName, // StorageObjectInUseProtection
 		podpriority.PluginName,                  // PodPriority

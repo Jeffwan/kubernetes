@@ -19,6 +19,7 @@ package validation
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/kubernetes/pkg/apis/core/helper/qos"
 	"math"
 	"net"
 	"path"
@@ -104,6 +105,40 @@ func ValidateHasLabel(meta metav1.ObjectMeta, fldPath *field.Path, key, expected
 			fmt.Sprintf("must be '%s'", expectedValue)))
 	}
 	return allErrs
+}
+
+var supportedResizeResources = sets.NewString(string(core.ResourceCPU), string(core.ResourceMemory))
+var supportedResizePolicies = sets.NewString(string(core.NoRestart), string(core.RestartContainer))
+
+func validateResizePolicy(policyList []core.ResizePolicy, fldPath *field.Path) field.ErrorList {
+	allErrors := field.ErrorList{}
+	// validate that resource name is not repeated, supported resource names and policy values are specified
+	resources := make(map[core.ResourceName]bool)
+
+	for i, p := range policyList {
+		if _, found := resources[p.ResourceName]; found {
+			allErrors = append(allErrors, field.Duplicate(fldPath.Index(i), p.ResourceName))
+		}
+		resources[p.ResourceName] = true
+
+		switch p.ResourceName {
+		case core.ResourceCPU, core.ResourceMemory:
+		case "":
+			allErrors = append(allErrors, field.Required(fldPath, ""))
+		default:
+			allErrors = append(allErrors, field.NotSupported(fldPath, p.ResourceName, supportedResizeResources.List()))
+		}
+
+		switch p.Policy {
+		case core.NoRestart, core.RestartContainer:
+		case "":
+			allErrors = append(allErrors, field.Required(fldPath, ""))
+		default:
+			allErrors = append(allErrors, field.NotSupported(fldPath, p.Policy, supportedResizePolicies.List()))
+		}
+	}
+
+	return allErrors
 }
 
 // ValidateAnnotations validates that a set of annotations are correctly defined.
@@ -2889,6 +2924,7 @@ func validateContainers(containers []core.Container, isInitContainers bool, volu
 		allErrs = append(allErrs, ValidateVolumeDevices(ctr.VolumeDevices, volMounts, volumes, idxPath.Child("volumeDevices"))...)
 		allErrs = append(allErrs, validatePullPolicy(ctr.ImagePullPolicy, idxPath.Child("imagePullPolicy"))...)
 		allErrs = append(allErrs, ValidateResourceRequirements(&ctr.Resources, idxPath.Child("resources"), opts)...)
+		allErrs = append(allErrs, validateResizePolicy(ctr.ResizePolicy, idxPath.Child("resizePolicy"))...)
 		allErrs = append(allErrs, ValidateSecurityContext(ctr.SecurityContext, idxPath.Child("securityContext"))...)
 	}
 
@@ -4005,6 +4041,15 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 		allErrs = append(allErrs, field.Invalid(specPath.Child("activeDeadlineSeconds"), newPod.Spec.ActiveDeadlineSeconds, "must not update from a positive integer to nil value"))
 	}
 
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+		// reject attempts to change pod qos
+		oldQos := qos.GetPodQOS(oldPod)
+		newQos := qos.GetPodQOS(newPod)
+		if newQos != oldQos {
+			allErrs = append(allErrs, field.Invalid(fldPath, newQos, fmt.Sprintf("Pod QoS is immutable under feature gate %s", features.InPlacePodUpdate)))
+		}
+	}
+
 	// Allow only additions to tolerations updates.
 	allErrs = append(allErrs, validateOnlyAddedTolerations(newPod.Spec.Tolerations, oldPod.Spec.Tolerations, specPath.Child("tolerations"))...)
 
@@ -4020,6 +4065,35 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 	var newContainers []core.Container
 	for ix, container := range mungedPodSpec.Containers {
 		container.Image = oldPod.Spec.Containers[ix].Image // +k8s:verify-mutation:reason=clone
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			// Resources and ResourcesAllocated fields are mutable (for CPU & memory only)
+			//   - user can modify Resources to express new desired Resources
+			//   - node can modify ResourcesAllocated to update Pod's allocated resources
+			mungeCpuMemResources := func(resourceList, oldResourceList core.ResourceList) core.ResourceList {
+				var mungedResourceList core.ResourceList
+				if oldResourceList != nil {
+					if resourceList != nil {
+						mungedResourceList = resourceList.DeepCopy()
+					} else {
+						mungedResourceList = make(core.ResourceList)
+					}
+					delete(mungedResourceList, core.ResourceCPU)
+					delete(mungedResourceList, core.ResourceMemory)
+					if cpu, found := oldResourceList[core.ResourceCPU]; found {
+						mungedResourceList[core.ResourceCPU] = cpu
+					}
+					if mem, found := oldResourceList[core.ResourceMemory]; found {
+						mungedResourceList[core.ResourceMemory] = mem
+					}
+				}
+				return mungedResourceList
+			}
+			lim := mungeCpuMemResources(container.Resources.Limits, oldPod.Spec.Containers[ix].Resources.Limits)
+			req := mungeCpuMemResources(container.Resources.Requests, oldPod.Spec.Containers[ix].Resources.Requests)
+			alloc := mungeCpuMemResources(container.ResourcesAllocated, oldPod.Spec.Containers[ix].ResourcesAllocated)
+			container.Resources = core.ResourceRequirements{Limits: lim, Requests: req}
+			container.ResourcesAllocated = alloc
+		}
 		newContainers = append(newContainers, container)
 	}
 	mungedPodSpec.Containers = newContainers
@@ -4043,7 +4117,7 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 		// This diff isn't perfect, but it's a helluva lot better an "I'm not going to tell you what the difference is".
 		//TODO: Pinpoint the specific field that causes the invalid error after we have strategic merge diff
 		specDiff := diff.ObjectDiff(mungedPodSpec, oldPod.Spec)
-		allErrs = append(allErrs, field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than `spec.containers[*].image`, `spec.initContainers[*].image`, `spec.activeDeadlineSeconds` or `spec.tolerations` (only additions to existing tolerations)\n%v", specDiff)))
+		allErrs = append(allErrs, field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than `spec.containers[*].image`, `spec.initContainers[*].image`, `spec.activeDeadlineSeconds` or `spec.tolerations` (only additions to existing tolerations) `spec.containers[*].resources` or `spec.containers[*].resourcesAllocated` (for cpu, memory only) \n%v", specDiff)))
 	}
 
 	return allErrs
