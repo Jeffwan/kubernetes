@@ -1727,6 +1727,11 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 		defaultWaitingState = v1.ContainerState{Waiting: &v1.ContainerStateWaiting{Reason: PodInitializing}}
 	}
 
+	var containerResources map[string]struct{ Allocations, Limits v1.ResourceList }
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+		containerResources = make(map[string]struct{ Allocations, Limits v1.ResourceList }, len(containers))
+	}
+
 	for _, container := range containers {
 		status := &v1.ContainerStatus{
 			Name:  container.Name,
@@ -1746,6 +1751,10 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 			}
 		}
 		statuses[container.Name] = status
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			containerResources[container.Name] = struct{ Allocations, Limits v1.ResourceList }{container.ResourcesAllocated, container.Resources.Limits}
+		}
 	}
 
 	for _, container := range containers {
@@ -1830,6 +1839,52 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 			oldStatusPtr = &oldStatus
 		}
 		status := convertContainerStatus(cStatus, oldStatusPtr)
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			if status.State.Running != nil {
+				var requests, limits v1.ResourceList
+				// Set initial limits from container's spec upon transition to Running state
+				// For cpu & memory, limits queried from runtime via CRI always supercedes spec.limit
+				// For ephemeral-storage, a running container's status.limit equals spec.limit
+				if containerResources[cName].Limits != nil {
+					// oldStatus should always exist if container state is running? TODO: Verify this.
+					oldStatus, oldStatusFound := oldStatuses[cName]
+					limits = make(v1.ResourceList)
+					determineResourceLimits := func(rName v1.ResourceName) {
+						if res, found := cStatus.ResourceLimits[rName]; found {
+							limits[rName] = res.DeepCopy()
+							return
+						}
+						if oldStatusFound {
+							if oldStatus.State.Running == nil || status.ContainerID != oldStatus.ContainerID {
+								if res, exists := containerResources[cName].Limits[rName]; exists {
+									limits[rName] = res.DeepCopy()
+								}
+							} else {
+								if oldStatus.Resources.Limits != nil {
+									if res, exists := oldStatus.Resources.Limits[rName]; exists {
+										limits[rName] = res.DeepCopy()
+									}
+								}
+							}
+						}
+					}
+					determineResourceLimits(v1.ResourceCPU)
+					determineResourceLimits(v1.ResourceMemory)
+					if ephemeralStorage, found := containerResources[cName].Limits[v1.ResourceEphemeralStorage]; found {
+						limits[v1.ResourceEphemeralStorage] = ephemeralStorage.DeepCopy()
+					}
+				}
+				// A running container's status.requests always comes from spec.resourcesAllocated
+				if containerResources[cName].Allocations != nil {
+					requests = containerResources[cName].Allocations.DeepCopy()
+				}
+				status.Resources = v1.ResourceRequirements{
+					Limits:   limits,
+					Requests: requests,
+				}
+			}
+		}
+
 		if containerSeen[cName] == 0 {
 			statuses[cName] = status
 		} else {

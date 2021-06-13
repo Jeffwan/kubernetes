@@ -56,7 +56,7 @@ type FakeContainer struct {
 	SandboxID string
 }
 
-// FakeRuntimeService is a fake runetime service.
+// FakeRuntimeService is a fake runtime service.
 type FakeRuntimeService struct {
 	sync.Mutex
 
@@ -507,7 +507,7 @@ func (r *FakeRuntimeService) ContainerStatus(containerID string) (*runtimeapi.Co
 }
 
 // UpdateContainerResources returns the container resource in the FakeRuntimeService.
-func (r *FakeRuntimeService) UpdateContainerResources(string, *runtimeapi.LinuxContainerResources) error {
+func (r *FakeRuntimeService) UpdateContainerResources(string, *runtimeapi.ContainerResources) error {
 	r.Lock()
 	defer r.Unlock()
 
