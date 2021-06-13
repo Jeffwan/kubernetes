@@ -116,6 +116,7 @@ func SetObjectDefaults_CronJob(in *v1beta1.CronJob) {
 		}
 		v1.SetDefaults_ResourceList(&a.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -166,6 +167,7 @@ func SetObjectDefaults_CronJob(in *v1beta1.CronJob) {
 		}
 		v1.SetDefaults_ResourceList(&a.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -216,6 +218,7 @@ func SetObjectDefaults_CronJob(in *v1beta1.CronJob) {
 		}
 		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
@@ -336,6 +339,7 @@ func SetObjectDefaults_JobTemplate(in *v1beta1.JobTemplate) {
 		}
 		v1.SetDefaults_ResourceList(&a.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -386,6 +390,7 @@ func SetObjectDefaults_JobTemplate(in *v1beta1.JobTemplate) {
 		}
 		v1.SetDefaults_ResourceList(&a.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -436,6 +441,7 @@ func SetObjectDefaults_JobTemplate(in *v1beta1.JobTemplate) {
 		}
 		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		v1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			v1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {

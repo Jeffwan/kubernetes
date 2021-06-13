@@ -34,6 +34,8 @@ type EphemeralContainerCommonApplyConfiguration struct {
 	EnvFrom                  []EnvFromSourceApplyConfiguration       `json:"envFrom,omitempty"`
 	Env                      []EnvVarApplyConfiguration              `json:"env,omitempty"`
 	Resources                *ResourceRequirementsApplyConfiguration `json:"resources,omitempty"`
+	ResourcesAllocated       *corev1.ResourceList                    `json:"resourcesAllocated,omitempty"`
+	ResizePolicy             []ResizePolicyApplyConfiguration        `json:"resizePolicy,omitempty"`
 	VolumeMounts             []VolumeMountApplyConfiguration         `json:"volumeMounts,omitempty"`
 	VolumeDevices            []VolumeDeviceApplyConfiguration        `json:"volumeDevices,omitempty"`
 	LivenessProbe            *ProbeApplyConfiguration                `json:"livenessProbe,omitempty"`
@@ -143,6 +145,27 @@ func (b *EphemeralContainerCommonApplyConfiguration) WithEnv(values ...*EnvVarAp
 // If called multiple times, the Resources field is set to the value of the last call.
 func (b *EphemeralContainerCommonApplyConfiguration) WithResources(value *ResourceRequirementsApplyConfiguration) *EphemeralContainerCommonApplyConfiguration {
 	b.Resources = value
+	return b
+}
+
+// WithResourcesAllocated sets the ResourcesAllocated field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ResourcesAllocated field is set to the value of the last call.
+func (b *EphemeralContainerCommonApplyConfiguration) WithResourcesAllocated(value corev1.ResourceList) *EphemeralContainerCommonApplyConfiguration {
+	b.ResourcesAllocated = &value
+	return b
+}
+
+// WithResizePolicy adds the given value to the ResizePolicy field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ResizePolicy field.
+func (b *EphemeralContainerCommonApplyConfiguration) WithResizePolicy(values ...*ResizePolicyApplyConfiguration) *EphemeralContainerCommonApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithResizePolicy")
+		}
+		b.ResizePolicy = append(b.ResizePolicy, *values[i])
+	}
 	return b
 }
 
