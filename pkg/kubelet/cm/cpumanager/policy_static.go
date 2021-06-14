@@ -18,6 +18,8 @@ package cpumanager
 
 import (
 	"fmt"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -299,6 +301,9 @@ func (p *staticPolicy) guaranteedCPUs(pod *v1.Pod, container *v1.Container) int 
 		return 0
 	}
 	cpuQuantity := container.Resources.Requests[v1.ResourceCPU]
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+		cpuQuantity = container.ResourcesAllocated[v1.ResourceCPU]
+	}
 	if cpuQuantity.Value()*1000 != cpuQuantity.MilliValue() {
 		return 0
 	}

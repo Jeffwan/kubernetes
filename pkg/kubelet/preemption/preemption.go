@@ -18,6 +18,8 @@ package preemption
 
 import (
 	"fmt"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 	"math"
 
 	"k8s.io/api/core/v1"
@@ -196,6 +198,9 @@ func (a admissionRequirementList) distance(pod *v1.Pod) float64 {
 	dist := float64(0)
 	for _, req := range a {
 		remainingRequest := float64(req.quantity - resource.GetResourceRequest(pod, req.resourceName))
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			remainingRequest = float64(req.quantity - resource.GetResourceAllocation(pod, req.resourceName))
+		}
 		if remainingRequest > 0 {
 			dist += math.Pow(remainingRequest/float64(req.quantity), 2)
 		}
@@ -210,7 +215,11 @@ func (a admissionRequirementList) subtract(pods ...*v1.Pod) admissionRequirement
 	for _, req := range a {
 		newQuantity := req.quantity
 		for _, pod := range pods {
-			newQuantity -= resource.GetResourceRequest(pod, req.resourceName)
+			if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+				newQuantity -= resource.GetResourceAllocation(pod, req.resourceName)
+			} else {
+				newQuantity -= resource.GetResourceRequest(pod, req.resourceName)
+			}
 			if newQuantity <= 0 {
 				break
 			}
@@ -260,8 +269,14 @@ func smallerResourceRequest(pod1 *v1.Pod, pod2 *v1.Pod) bool {
 		v1.ResourceCPU,
 	}
 	for _, res := range priorityList {
-		req1 := resource.GetResourceRequest(pod1, res)
-		req2 := resource.GetResourceRequest(pod2, res)
+		var req1, req2 int64
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			req1 = resource.GetResourceAllocation(pod1, res)
+			req2 = resource.GetResourceAllocation(pod2, res)
+		} else {
+			req1 = resource.GetResourceRequest(pod1, res)
+			req2 = resource.GetResourceRequest(pod2, res)
+		}
 		if req1 < req2 {
 			return true
 		} else if req1 > req2 {

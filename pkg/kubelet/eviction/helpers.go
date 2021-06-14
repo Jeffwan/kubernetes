@@ -18,6 +18,8 @@ package eviction
 
 import (
 	"fmt"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 	"sort"
 	"strconv"
 	"strings"
@@ -511,10 +513,16 @@ func exceedMemoryRequests(stats statsFunc) cmpFunc {
 
 		p1Memory := memoryUsage(p1Stats.Memory)
 		p2Memory := memoryUsage(p2Stats.Memory)
-		p1ExceedsRequests := p1Memory.Cmp(v1resource.GetResourceRequestQuantity(p1, v1.ResourceMemory)) == 1
-		p2ExceedsRequests := p2Memory.Cmp(v1resource.GetResourceRequestQuantity(p2, v1.ResourceMemory)) == 1
+		var p1Exceeds, p2Exceeds bool
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			p1Exceeds = p1Memory.Cmp(v1resource.GetResourceAllocationQuantity(p1, v1.ResourceMemory)) == 1
+			p2Exceeds = p2Memory.Cmp(v1resource.GetResourceAllocationQuantity(p2, v1.ResourceMemory)) == 1
+		} else {
+			p1Exceeds = p1Memory.Cmp(v1resource.GetResourceRequestQuantity(p1, v1.ResourceMemory)) == 1
+			p2Exceeds = p2Memory.Cmp(v1resource.GetResourceRequestQuantity(p2, v1.ResourceMemory)) == 1
+		}
 		// prioritize evicting the pod which exceeds its requests
-		return cmpBool(p1ExceedsRequests, p2ExceedsRequests)
+		return cmpBool(p1Exceeds, p2Exceeds)
 	}
 }
 
@@ -531,10 +539,16 @@ func memory(stats statsFunc) cmpFunc {
 		// adjust p1, p2 usage relative to the request (if any)
 		p1Memory := memoryUsage(p1Stats.Memory)
 		p1Request := v1resource.GetResourceRequestQuantity(p1, v1.ResourceMemory)
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			p1Request = v1resource.GetResourceAllocationQuantity(p1, v1.ResourceMemory)
+		}
 		p1Memory.Sub(p1Request)
 
 		p2Memory := memoryUsage(p2Stats.Memory)
 		p2Request := v1resource.GetResourceRequestQuantity(p2, v1.ResourceMemory)
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			p2Request = v1resource.GetResourceAllocationQuantity(p2, v1.ResourceMemory)
+		}
 		p2Memory.Sub(p2Request)
 
 		// prioritize evicting the pod which has the larger consumption of memory
@@ -1011,6 +1025,9 @@ func evictionMessage(resourceToReclaim v1.ResourceName, pod *v1.Pod, stats stats
 		for _, container := range pod.Spec.Containers {
 			if container.Name == containerStats.Name {
 				requests := container.Resources.Requests[resourceToReclaim]
+				if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+					requests = container.ResourcesAllocated[resourceToReclaim]
+				}
 				var usage *resource.Quantity
 				switch resourceToReclaim {
 				case v1.ResourceEphemeralStorage:

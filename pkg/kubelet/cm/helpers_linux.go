@@ -118,6 +118,9 @@ func HugePageLimits(resourceList v1.ResourceList) map[int64]int64 {
 func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64) *ResourceConfig {
 	// sum requests and limits.
 	reqs, limits := resource.PodRequestsAndLimits(pod)
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodUpdate) {
+		reqs = resource.PodResourceAllocations(pod)
+	}
 
 	cpuRequests := int64(0)
 	cpuLimits := int64(0)
@@ -149,6 +152,9 @@ func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64) 
 			memoryLimitsDeclared = false
 		}
 		containerHugePageLimits := HugePageLimits(container.Resources.Requests)
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodUpdate) {
+			containerHugePageLimits = HugePageLimits(container.ResourcesAllocated)
+		}
 		for k, v := range containerHugePageLimits {
 			if value, exists := hugePageLimits[k]; exists {
 				hugePageLimits[k] = value + v
