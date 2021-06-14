@@ -38,6 +38,8 @@ import (
 	quota "k8s.io/apiserver/pkg/quota/v1"
 	"k8s.io/apiserver/pkg/quota/v1/generic"
 	"k8s.io/client-go/util/workqueue"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // Evaluator is used to see if quota constraints are satisfied.
@@ -507,6 +509,16 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 			prevUsage, innerErr := evaluator.Usage(prevItem)
 			if innerErr != nil {
 				return quotas, innerErr
+			}
+
+			// TODO: can apiserver import k8s.io/kuebrnetes?
+			if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+				// allow negative usage for pods as pod resources can increase or decrease
+				if a.GetResource().GroupResource() == corev1.Resource("pods") {
+					deltaUsage = quota.Subtract(deltaUsage, prevUsage)
+				}
+			} else {
+				deltaUsage = quota.SubtractWithNonNegativeResult(deltaUsage, prevUsage)
 			}
 			deltaUsage = quota.SubtractWithNonNegativeResult(deltaUsage, prevUsage)
 		}

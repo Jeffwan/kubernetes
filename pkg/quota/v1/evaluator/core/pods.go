@@ -32,6 +32,7 @@ import (
 	quota "k8s.io/apiserver/pkg/quota/v1"
 	"k8s.io/apiserver/pkg/quota/v1/generic"
 	"k8s.io/apiserver/pkg/util/feature"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/apis/core/v1/helper"
@@ -146,7 +147,7 @@ func (p *podEvaluator) GroupResource() schema.GroupResource {
 // Handles returns true if the evaluator should handle the specified attributes.
 func (p *podEvaluator) Handles(a admission.Attributes) bool {
 	op := a.GetOperation()
-	if op == admission.Create {
+	if op == admission.Create || (utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) && op == admission.Update){
 		return true
 	}
 	return false

@@ -1744,8 +1744,6 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 
 func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, string) {
 	var otherActivePods []*v1.Pod
-	kl.podResizeMutex.Lock()
-	defer kl.podResizeMutex.Unlock()
 	activePods := kl.GetActivePods()
 	for _, p := range activePods {
 		if p.UID != pod.UID {
@@ -1768,6 +1766,7 @@ func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, string) {
 		resourcePatchData = strings.TrimRight(resourcePatchData, ",")
 		containerPatchData += fmt.Sprintf(`{"name":"%s","resourcesAllocated":{%s}},`, container.Name, resourcePatchData)
 	}
+	kl.podManager.UpdatePod(pod)
 
 	containerPatchData = strings.TrimRight(containerPatchData, ",")
 	podPatchData := fmt.Sprintf(`{"spec":{"containers":[%s]}}`, containerPatchData)
@@ -1786,6 +1785,8 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 		return
 	}
 
+	kl.podResizeMutex.Lock()
+	defer kl.podResizeMutex.Unlock()
 	if fit, patchData := kl.canResizePod(pod); fit {
 		_, patchError := kl.kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.StrategicMergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if patchError != nil {
