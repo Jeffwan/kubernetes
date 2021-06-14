@@ -104,3 +104,31 @@ func (m *FakePodContainerManager) IsPodCgroup(cgroupfs string) (bool, types.UID)
 	m.CalledFunctions = append(m.CalledFunctions, "IsPodCgroup")
 	return false, types.UID("")
 }
+
+func (m *FakePodContainerManager) GetPodCgroupMemoryConfig(_ *v1.Pod) (uint64, error) {
+	m.Lock()
+	defer m.Unlock()
+	m.CalledFunctions = append(m.CalledFunctions, "GetPodCgroupMemoryConfig")
+	return 0, nil
+}
+
+func (m *FakePodContainerManager) GetPodCgroupCpuConfig(_ *v1.Pod) (int64, uint64, uint64, error) {
+	m.Lock()
+	defer m.Unlock()
+	m.CalledFunctions = append(m.CalledFunctions, "GetPodCgroupCpuConfig")
+	return 0, 0, 0, nil
+}
+
+func (m *FakePodContainerManager) SetPodCgroupMemoryConfig(_ *v1.Pod, _ int64) error {
+	m.Lock()
+	defer m.Unlock()
+	m.CalledFunctions = append(m.CalledFunctions, "SetPodCgroupMemoryConfig")
+	return nil
+}
+
+func (m *FakePodContainerManager) SetPodCgroupCpuConfig(_ *v1.Pod, _ *int64, _, _ *uint64) error {
+	m.Lock()
+	defer m.Unlock()
+	m.CalledFunctions = append(m.CalledFunctions, "SetPodCgroupCpuConfig")
+	return nil
+}

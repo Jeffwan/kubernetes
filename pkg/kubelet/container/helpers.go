@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -102,6 +104,17 @@ func HashContainer(container *v1.Container) uint64 {
 	hash := fnv.New32a()
 	// Omit nil or empty field when calculating hash value
 	// Please see https://github.com/kubernetes/kubernetes/issues/53644
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+		cResource := container.Resources
+		cResourceAllocated := container.ResourcesAllocated
+		container.Resources = v1.ResourceRequirements{}
+		container.ResourcesAllocated = nil
+		defer func() {
+			container.Resources = cResource
+			container.ResourcesAllocated = cResourceAllocated
+		}()
+	}
+
 	containerJSON, _ := json.Marshal(container)
 	hashutil.DeepHashObject(hash, containerJSON)
 	return uint64(hash.Sum32())
