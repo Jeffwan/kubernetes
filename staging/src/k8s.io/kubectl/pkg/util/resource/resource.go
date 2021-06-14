@@ -67,7 +67,7 @@ func PodResourceAllocations(pod *corev1.Pod) (allocations corev1.ResourceList) {
 	for _, container := range pod.Spec.InitContainers {
 		maxResourceList(allocations, container.Resources.Requests)
 	}
-	if pod.Spec.Overhead != nil && utilfeature.DefaultFeatureGate.Enabled(features.PodOverhead) {
+	if pod.Spec.Overhead != nil {
 		addResourceList(allocations, pod.Spec.Overhead)
 	}
 	return

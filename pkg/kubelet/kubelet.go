@@ -19,8 +19,10 @@ package kubelet
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"math"
 	"net"
 	"net/http"
@@ -1742,7 +1744,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	return nil
 }
 
-func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, string) {
+func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, []byte) {
 	var otherActivePods []*v1.Pod
 	activePods := kl.GetActivePods()
 	for _, p := range activePods {
@@ -1753,24 +1755,35 @@ func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, string) {
 
 	if ok, failReason, failMessage := kl.canAdmitPod(otherActivePods, pod); !ok {
 		klog.V(2).Infof("Pod '%s' resize can not be accomended. Reason: '%s' Message: '%s'", pod.Name, failReason, failMessage)
-		return false, ""
+		return false, nil
 	}
 
-	var containerPatchData string
-	for _, container := range pod.Spec.Containers {
-		var resourcePatchData string
+	podCopy := pod.DeepCopy()
+	for _, container := range podCopy.Spec.Containers {
 		for rName, rQuantity := range container.Resources.Requests {
 			container.ResourcesAllocated[rName] = rQuantity
-			resourcePatchData += fmt.Sprintf(`"%s":"%s",`, rName, rQuantity.String())
 		}
-		resourcePatchData = strings.TrimRight(resourcePatchData, ",")
-		containerPatchData += fmt.Sprintf(`{"name":"%s","resourcesAllocated":{%s}},`, container.Name, resourcePatchData)
 	}
-	kl.podManager.UpdatePod(pod)
 
-	containerPatchData = strings.TrimRight(containerPatchData, ",")
-	podPatchData := fmt.Sprintf(`{"spec":{"containers":[%s]}}`, containerPatchData)
-	return true, podPatchData
+	oldPodJSON, err := json.Marshal(v1.Pod{Spec: pod.Spec})
+	if err != nil {
+		klog.Errorf("Failed to marshal pod spec for %s: %+v\n", pod.Name, err)
+		return false, nil
+	}
+	updatedPodJSON, err := json.Marshal(v1.Pod{Spec: podCopy.Spec})
+	if err != nil {
+		klog.Errorf("Failed to marshal updated pod spec for %s: %+v\n", podCopy.Name, err)
+		return false, nil
+	}
+	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldPodJSON, updatedPodJSON, v1.Pod{})
+	if err != nil {
+		klog.Errorf("Failed to create pod resize patch for %s: %+v\n", pod.Name, err)
+		return false, nil
+	}
+	kl.podManager.UpdatePod(podCopy)
+	*pod = *podCopy
+
+	return true, patchBytes
 }
 
 func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
@@ -1787,8 +1800,8 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 
 	kl.podResizeMutex.Lock()
 	defer kl.podResizeMutex.Unlock()
-	if fit, patchData := kl.canResizePod(pod); fit {
-		_, patchError := kl.kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.StrategicMergePatchType, []byte(patchData), metav1.PatchOptions{})
+	if fit, patchBytes := kl.canResizePod(pod); fit {
+		_, patchError := kl.kubeClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
 		if patchError != nil {
 			klog.Errorf("Failed to patch ResourcesAllocated values for pod %s: %+v\n", pod.Name, patchError)
 		}

@@ -3995,6 +3995,12 @@ func validateSeccompAnnotationsAndFieldsMatch(annotationValue string, seccompFie
 // ValidatePodUpdate tests to see if the update is legal for an end user to make. newPod is updated with fields
 // that cannot be changed.
 func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) field.ErrorList {
+	updatableSpecFields := []string{
+		"`spec.containers[*].image`",
+		"`spec.initContainers[*].image`",
+		"`spec.activeDeadlineSeconds`",
+		"`spec.tolerations` (only additions to existing tolerations)",
+	}
 	fldPath := field.NewPath("metadata")
 	allErrs := ValidateObjectMetaUpdate(&newPod.ObjectMeta, &oldPod.ObjectMeta, fldPath)
 	allErrs = append(allErrs, validatePodMetadataAndSpec(newPod, opts)...)
@@ -4066,6 +4072,7 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 	for ix, container := range mungedPodSpec.Containers {
 		container.Image = oldPod.Spec.Containers[ix].Image // +k8s:verify-mutation:reason=clone
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodUpdate) {
+			updatableSpecFields = append(updatableSpecFields, "`spec.containers[*].resourcesAllocated` (for CPU/memory only)")
 			// Resources and ResourcesAllocated fields are mutable (for CPU & memory only)
 			//   - user can modify Resources to express new desired Resources
 			//   - node can modify ResourcesAllocated to update Pod's allocated resources
@@ -4117,7 +4124,7 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 		// This diff isn't perfect, but it's a helluva lot better an "I'm not going to tell you what the difference is".
 		//TODO: Pinpoint the specific field that causes the invalid error after we have strategic merge diff
 		specDiff := diff.ObjectDiff(mungedPodSpec, oldPod.Spec)
-		allErrs = append(allErrs, field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than `spec.containers[*].image`, `spec.initContainers[*].image`, `spec.activeDeadlineSeconds` or `spec.tolerations` (only additions to existing tolerations) `spec.containers[*].resources` or `spec.containers[*].resourcesAllocated` (for cpu, memory only) \n%v", specDiff)))
+		allErrs = append(allErrs, field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than %s\n%v", strings.Join(updatableSpecFields, ","), specDiff)))
 	}
 
 	return allErrs

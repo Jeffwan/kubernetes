@@ -83,8 +83,6 @@ import (
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 	"k8s.io/kubectl/pkg/util/slice"
 	storageutil "k8s.io/kubectl/pkg/util/storage"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/kubernetes/pkg/features"
 )
 
 // Each level has 2 spaces for PrefixWriter

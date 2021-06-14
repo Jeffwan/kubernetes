@@ -133,7 +133,6 @@ func getFormattedResourceQuantity(resourceName v1.ResourceName) resource.Quantit
 	return resourceQuantity
 }
 
-
 func addPodOverheadQuantity(pod *v1.Pod, resourceName v1.ResourceName, resourceQuantity resource.Quantity) resource.Quantity {
 	// if PodOverhead feature is supported, add overhead for running a pod
 	// to the total requests if the resource total is non-zero
@@ -194,7 +193,6 @@ func GetResourceAllocationQuantity(pod *v1.Pod, resourceName v1.ResourceName) re
 	return allocQuantity
 }
 
-
 // GetResourceRequest finds and returns the request value for a specific resource.
 func GetResourceRequest(pod *v1.Pod, resource v1.ResourceName) int64 {
 	if resource == v1.ResourcePods {
@@ -221,7 +219,6 @@ func GetResourceAllocation(pod *v1.Pod, resource v1.ResourceName) int64 {
 	}
 	return allocQuantity.Value()
 }
-
 
 // ExtractResourceValueByContainerName extracts the value of a resource
 // by providing container name
