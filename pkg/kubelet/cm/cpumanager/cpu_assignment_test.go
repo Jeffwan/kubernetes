@@ -300,6 +300,7 @@ func TestTakeByTopology(t *testing.T) {
 	testCases := []struct {
 		description   string
 		topo          *topology.CPUTopology
+		opts          StaticPolicyOptions
 		availableCPUs cpuset.CPUSet
 		numCPUs       int
 		expErr        string
@@ -308,6 +309,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take more cpus than are available from single socket with HT",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 2, 4, 6),
 			5,
 			"not enough cpus available to satisfy request",
@@ -316,6 +318,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take zero cpus from single socket with HT",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7),
 			0,
 			"",
@@ -324,6 +327,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take one cpu from single socket with HT",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7),
 			1,
 			"",
@@ -332,6 +336,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take one cpu from single socket with HT, some cpus are taken",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(1, 3, 5, 6, 7),
 			1,
 			"",
@@ -340,6 +345,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take two cpus from single socket with HT",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7),
 			2,
 			"",
@@ -348,6 +354,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take all cpus from single socket with HT",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7),
 			8,
 			"",
@@ -356,6 +363,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take two cpus from single socket with HT, only one core totally free",
 			topoSingleSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 6),
 			2,
 			"",
@@ -364,6 +372,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take one cpu from dual socket with HT - core from Socket 0",
 			topoDualSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(1, 2, 3, 4, 5, 7, 8, 9, 10, 11),
 			1,
 			"",
@@ -372,6 +381,7 @@ func TestTakeByTopology(t *testing.T) {
 		{
 			"take a socket of cpus from dual socket with HT",
 			topoDualSocketHT,
+			StaticPolicyOptions{},
 			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			6,
 			"",
@@ -380,7 +390,58 @@ func TestTakeByTopology(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		result, err := takeByTopology(tc.topo, tc.availableCPUs, tc.numCPUs)
+		result, err := takeByTopology(tc.topo, tc.opts, tc.availableCPUs, tc.numCPUs)
+		if tc.expErr != "" && err.Error() != tc.expErr {
+			t.Errorf("expected error to be [%v] but it was [%v] in test \"%s\"", tc.expErr, err, tc.description)
+		}
+		if !result.Equals(tc.expResult) {
+			t.Errorf("expected result [%s] to equal [%s] in test \"%s\"", result, tc.expResult, tc.description)
+		}
+	}
+}
+
+func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
+	testCases := []struct {
+		description   string
+		topo          *topology.CPUTopology
+		opts          StaticPolicyOptions
+		availableCPUs cpuset.CPUSet
+		numCPUs       int
+		expErr        string
+		expResult     cpuset.CPUSet
+	}{
+		{
+			"take a socket of cpus from dual socket with HT, 2 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferredOption: true},
+			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			2,
+			"",
+			cpuset.NewCPUSet(0, 2),
+		},
+		{
+			"take a socket of cpus from dual socket with HT, 3 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferredOption: true},
+			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			3,
+			"",
+			cpuset.NewCPUSet(0, 2, 4),
+		},
+		{
+			"take a socket of cpus from dual socket with HT, 6 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferredOption: true},
+			cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			6,
+			"",
+			cpuset.NewCPUSet(0, 2, 4, 6, 8, 10),
+		},
+		// Add more cases from zicong
+	}
+
+	for _, tc := range testCases {
+		result, err := takeByTopology(tc.topo, tc.opts, tc.availableCPUs, tc.numCPUs)
 		if tc.expErr != "" && err.Error() != tc.expErr {
 			t.Errorf("expected error to be [%v] but it was [%v] in test \"%s\"", tc.expErr, err, tc.description)
 		}

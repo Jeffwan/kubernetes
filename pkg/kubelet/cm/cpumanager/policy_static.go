@@ -128,7 +128,7 @@ func NewStaticPolicy(topology *topology.CPUTopology, numReservedCPUs int, reserv
 		//
 		// For example: Given a system with 8 CPUs available and HT enabled,
 		// if numReservedCPUs=2, then reserved={0,4}
-		reserved, _ = takeByTopology(topology, allCPUs, numReservedCPUs)
+		reserved, _ = takeByTopology(topology, opts, allCPUs, numReservedCPUs)
 	}
 
 	if reserved.Size() != numReservedCPUs {
@@ -259,7 +259,7 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 			// and the scheduler is responsible for ensuring that the workload goes to a node that has enough CPUs,
 			// the pod would be placed on a node where there are enough physical cores available to be allocated.
 			// Just like the behaviour in case of static policy, takeByTopology will try to first allocate CPUs from the same socket
-			// and only in case the request cannot be sattisfied on a single socket, CPU allocation is done for a workload to occupy all
+			// and only in case the request cannot be satisfied on a single socket, CPU allocation is done for a workload to occupy all
 			// CPUs on a physical core. Allocation of individual threads would never have to occur.
 			return SMTAlignmentError{
 				RequestedCPUs: numCPUs,
@@ -318,7 +318,7 @@ func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bit
 			numAlignedToAlloc = numCPUs
 		}
 
-		alignedCPUs, err := takeByTopology(p.topology, alignedCPUs, numAlignedToAlloc)
+		alignedCPUs, err := takeByTopology(p.topology, p.options, alignedCPUs, numAlignedToAlloc)
 		if err != nil {
 			return cpuset.NewCPUSet(), err
 		}
@@ -327,7 +327,7 @@ func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bit
 	}
 
 	// Get any remaining CPUs from what's leftover after attempting to grab aligned ones.
-	remainingCPUs, err := takeByTopology(p.topology, allocatableCPUs.Difference(result), numCPUs-result.Size())
+	remainingCPUs, err := takeByTopology(p.topology, p.options, allocatableCPUs.Difference(result), numCPUs-result.Size())
 	if err != nil {
 		return cpuset.NewCPUSet(), err
 	}

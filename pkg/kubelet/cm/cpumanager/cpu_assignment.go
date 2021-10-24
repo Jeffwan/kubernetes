@@ -133,6 +133,19 @@ func (a *cpuAccumulator) sortAvailableCPUs() []int {
 	return result
 }
 
+// Sort all available CPUs:
+// - First by core using sortAvailableSockets().
+// - Then within each socket, sort cpus directly using the sort() algorithm defined above.
+func (a *cpuAccumulator) sortAvailableSpreadCPUs() []int {
+	var result []int
+	for _, socket := range a.sortAvailableSockets() {
+		cpus := a.details.CPUsInSockets(socket).ToSliceNoSort()
+		sort.Ints(cpus)
+		result = append(result, cpus...)
+	}
+	return result
+}
+
 func (a *cpuAccumulator) take(cpus cpuset.CPUSet) {
 	a.result = a.result.Union(cpus)
 	a.details = a.details.KeepOnly(a.details.CPUs().Difference(a.result))
@@ -161,6 +174,21 @@ func (a *cpuAccumulator) takeFullCores() {
 	}
 }
 
+// takeCPUSpreadCores sorts CPUs in a spread ways. This gives logical CPUs spread physical cores.
+// The changes are
+// 1. No need to sort by cores. Get all HTs under socket and sort it -> sort give you right sequence?
+// 2. Don't allocate resource by entire core.
+func (a *cpuAccumulator) takeCPUSpreadCores() {
+	cpus := a.sortAvailableSpreadCPUs()
+	for _, cpu := range cpus {
+		klog.V(4).InfoS("takeRemainingCPUs: claiming CPU", "cpu", cpu)
+		a.take(cpuset.NewCPUSet(cpu))
+		if a.isSatisfied() {
+			return
+		}
+	}
+}
+
 func (a *cpuAccumulator) takeRemainingCPUs() {
 	for _, cpu := range a.sortAvailableCPUs() {
 		klog.V(4).InfoS("takeRemainingCPUs: claiming CPU", "cpu", cpu)
@@ -183,7 +211,7 @@ func (a *cpuAccumulator) isFailed() bool {
 	return a.numCPUsNeeded > a.details.CPUs().Size()
 }
 
-func takeByTopology(topo *topology.CPUTopology, availableCPUs cpuset.CPUSet, numCPUs int) (cpuset.CPUSet, error) {
+func takeByTopology(topo *topology.CPUTopology, opts StaticPolicyOptions, availableCPUs cpuset.CPUSet, numCPUs int) (cpuset.CPUSet, error) {
 	acc := newCPUAccumulator(topo, availableCPUs, numCPUs)
 	if acc.isSatisfied() {
 		return acc.result, nil
@@ -200,9 +228,15 @@ func takeByTopology(topo *topology.CPUTopology, availableCPUs cpuset.CPUSet, num
 		return acc.result, nil
 	}
 
-	// 2. Acquire whole cores, if available and the container requires at least
-	//    a core's-worth of CPUs.
-	acc.takeFullCores()
+	if opts.SpreadPhysicalCPUsPreferredOption {
+		// 2. Acquire cpus directly with spread ordering
+		acc.takeCPUSpreadCores()
+	} else {
+		// 2. Acquire whole cores, if available and the container requires at least
+		//    a core's-worth of CPUs.
+		acc.takeFullCores()
+	}
+
 	if acc.isSatisfied() {
 		return acc.result, nil
 	}

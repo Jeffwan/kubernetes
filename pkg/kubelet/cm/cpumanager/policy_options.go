@@ -24,6 +24,9 @@ import (
 const (
 	// FullPCPUsOnlyOption is the name of the CPU Manager policy option
 	FullPCPUsOnlyOption string = "full-pcpus-only"
+
+	// SpreadPhysicalCPUsPreferredOption is the name of the CPU Manager policy option
+	SpreadPhysicalCPUsPreferredOption string = "spread-pcpus-preferred"
 )
 
 type StaticPolicyOptions struct {
@@ -36,6 +39,11 @@ type StaticPolicyOptions struct {
 	// any possible naming scheme will lead to ambiguity to some extent.
 	// We picked "pcpu" because it the established docs hints at vCPU already.
 	FullPhysicalCPUsOnly bool
+
+	// flag to enable extra allocation restrictions to spread
+	// cpus (HT) on different physical core.
+	// This is a preferred policy so do not throw error if they have to packed in one physical core.
+	SpreadPhysicalCPUsPreferredOption bool
 }
 
 func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOptions, error) {
@@ -48,6 +56,12 @@ func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOption
 				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
 			}
 			opts.FullPhysicalCPUsOnly = optValue
+		case SpreadPhysicalCPUsPreferredOption:
+			optValue, err := strconv.ParseBool(value)
+			if err != nil {
+				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
+			}
+			opts.SpreadPhysicalCPUsPreferredOption = optValue
 		default:
 			return opts, fmt.Errorf("unsupported cpumanager option: %q (%s)", name, value)
 		}
