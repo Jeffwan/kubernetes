@@ -323,7 +323,7 @@ func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bit
 			numAlignedToAlloc = numCPUs
 		}
 
-		alignedCPUs, err := p.takeByTopology(alignedCPUs, numAlignedToAlloc)
+		alignedCPUs, err := p.takeByTopology(alignedCPUs, numAlignedToAlloc, p.options)
 		if err != nil {
 			return cpuset.NewCPUSet(), err
 		}
@@ -332,7 +332,7 @@ func (p *staticPolicy) allocateCPUs(s state.State, numCPUs int, numaAffinity bit
 	}
 
 	// Get any remaining CPUs from what's leftover after attempting to grab aligned ones.
-	remainingCPUs, err := p.takeByTopology(allocatableCPUs.Difference(result), numCPUs-result.Size())
+	remainingCPUs, err := p.takeByTopology(allocatableCPUs.Difference(result), numCPUs-result.Size(), p.options)
 	if err != nil {
 		return cpuset.NewCPUSet(), err
 	}
