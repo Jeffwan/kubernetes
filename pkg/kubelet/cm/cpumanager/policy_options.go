@@ -28,6 +28,8 @@ import (
 const (
 	FullPCPUsOnlyOption            string = "full-pcpus-only"
 	DistributeCPUsAcrossNUMAOption string = "distribute-cpus-across-numa"
+	// SpreadPhysicalCPUsPreferredOption is the name of the CPU Manager policy option
+	SpreadPhysicalCPUsPreferredOption string = "spread-pcpus-preferred"
 )
 
 var (
@@ -69,6 +71,10 @@ type StaticPolicyOptions struct {
 	// Flag to evenly distribute CPUs across NUMA nodes in cases where more
 	// than one NUMA node is required to satisfy the allocation.
 	DistributeCPUsAcrossNUMA bool
+	// flag to enable extra allocation restrictions to spread
+	// cpus (HT) on different physical core.
+	// This is a preferred policy so do not throw error if they have to packed in one physical core.
+	SpreadPhysicalCPUsPreferredOption bool
 }
 
 func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOptions, error) {
@@ -91,6 +97,12 @@ func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOption
 				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
 			}
 			opts.DistributeCPUsAcrossNUMA = optValue
+		case SpreadPhysicalCPUsPreferredOption:
+			optValue, err := strconv.ParseBool(value)
+			if err != nil {
+				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
+			}
+			opts.SpreadPhysicalCPUsPreferredOption = optValue
 		default:
 			// this should never be reached, we already detect unknown options,
 			// but we keep it as further safety.
