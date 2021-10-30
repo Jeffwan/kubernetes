@@ -734,7 +734,6 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 	}
 }
 
-
 type takeByTopologyExtendedTestCase struct {
 	description   string
 	topo          *topology.CPUTopology
