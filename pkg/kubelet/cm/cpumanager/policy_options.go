@@ -35,6 +35,7 @@ const (
 var (
 	alphaOptions = sets.NewString(
 		DistributeCPUsAcrossNUMAOption,
+		SpreadPhysicalCPUsPreferredOption,
 	)
 	betaOptions = sets.NewString(
 		FullPCPUsOnlyOption,
