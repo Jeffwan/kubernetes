@@ -752,6 +752,7 @@ func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *ku
 
 func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, podStatus *kubecontainer.PodStatus, resourceKind ResizeResourceKind, containersToUpdate []containerToUpdateInfo) error {
 	updatedContainersMap := make(map[kubecontainer.ContainerID]*kubecontainer.Status)
+	apiContainerMap := make(map[kubecontainer.ContainerID]*v1.Container)
 
 	for _, cInfo := range containersToUpdate {
 		container := cInfo.apiContainer.DeepCopy()
@@ -806,6 +807,8 @@ func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, pod
 			return err
 		}
 		updatedContainersMap[cInfo.kubeContainerStatus.ID] = cInfo.kubeContainerStatus
+		// Use kubeContainer status id for easy pairing.
+		apiContainerMap[cInfo.kubeContainerStatus.ID] = cInfo.apiContainer
 	}
 
 	if len(updatedContainersMap) > 0 {
@@ -822,7 +825,19 @@ func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, pod
 			if c, found := updatedContainersMap[newContainerStatus.ID]; found {
 				if newContainerStatus.Resources.Limits == nil && newContainerStatus.Resources.Requests == nil {
 					klog.ErrorS(err, "runtime failed to report resources", "pod", format.Pod(pod))
-					return fmt.Errorf("runtime failed to report resources for pod %s", pod.Name)
+					//return fmt.Errorf("runtime failed to report resources for pod %s", pod.Name)
+
+					// This is kind of hack to successfully update container resources
+					// 1. containerd won't work since there's no server side changes yet. (docker server change is in k8s)
+					// 2. it should be safe and update will be rejected if there's limited resources and it won't enter this step.
+					apiContainer := apiContainerMap[newContainerStatus.ID]
+					if apiContainer.Resources.Limits != nil {
+						c.Resources.Limits = apiContainer.Resources.Limits
+					}
+
+					if apiContainer.Resources.Requests != nil {
+						c.Resources.Requests = apiContainer.Resources.Requests
+					}
 				}
 				if newContainerStatus.Resources.Limits != nil {
 					c.Resources.Limits = newContainerStatus.Resources.Limits.DeepCopy()
