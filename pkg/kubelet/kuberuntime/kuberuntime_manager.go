@@ -816,7 +816,9 @@ func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, pod
 			klog.ErrorS(err, "GetPodStatus failed", "pod", format.Pod(pod))
 			return err
 		}
+		// TODO: code issue
 		for _, newContainerStatus := range newPodStatus.ContainerStatuses {
+			klog.Infof("newContainerStatus %v", newContainerStatus.Resources)
 			if c, found := updatedContainersMap[newContainerStatus.ID]; found {
 				if newContainerStatus.Resources.Limits == nil && newContainerStatus.Resources.Requests == nil {
 					klog.ErrorS(err, "runtime failed to report resources", "pod", format.Pod(pod))

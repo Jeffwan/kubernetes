@@ -1965,6 +1965,10 @@ func (kl *Kubelet) canAdmitPod(pods []*v1.Pod, pod *v1.Pod) (bool, string, strin
 		// Use allocated resources values from checkpoint store (source of truth) to determine fit
 		otherPods := make([]*v1.Pod, 0, len(pods))
 		checkpointState := kl.statusManager.State()
+		if checkpointState == nil {
+			klog.V(2).Info("Can not fetch checkpoint status from statusManager")
+		}
+
 		for _, p := range pods {
 			op := p.DeepCopy()
 			for _, c := range op.Spec.Containers {
@@ -2270,6 +2274,11 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 				// To handle kubelet restarts, test pod admissibility using ResourcesAllocated values
 				// (for cpu & memory) from checkpoint store. If found, that is the source of truth.
 				checkpointState := kl.statusManager.State()
+				if checkpointState == nil {
+					klog.V(2).Info("failed to get checkpoint state from statusManager")
+					continue
+				}
+
 				podCopy := pod.DeepCopy()
 				for _, c := range podCopy.Spec.Containers {
 					resourcesAllocated, found := checkpointState.GetContainerResourceAllocation(string(pod.UID), c.Name)
