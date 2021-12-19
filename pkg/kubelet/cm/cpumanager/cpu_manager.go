@@ -184,6 +184,7 @@ func NewManager(cpuPolicyName string, cpuPolicyOptions map[string]string, reconc
 		// exclusively allocated.
 		reservedCPUsFloat := float64(reservedCPUs.MilliValue()) / 1000
 		numReservedCPUs := int(math.Ceil(reservedCPUsFloat))
+		klog.InfoS("Detected reserved CPUs", "reservedCPUsFloat", reservedCPUsFloat, "numReservedCPUs", numReservedCPUs)
 		policy, err = NewStaticPolicy(topo, numReservedCPUs, specificCPUs, affinity, cpuPolicyOptions)
 		if err != nil {
 			return nil, fmt.Errorf("new static policy error: %w", err)

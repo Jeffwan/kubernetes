@@ -708,6 +708,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 			s.SystemReserved["cpu"] = strconv.Itoa(reservedSystemCPUs.Size())
 			klog.InfoS("After cpu setting is overwritten", "kubeReservedCPUs", s.KubeReserved, "systemReservedCPUs", s.SystemReserved)
 		}
+		klog.InfoS("reserved CPUs", "s.ReservedSystemCPUs", s.ReservedSystemCPUs, "reservedSystemCPUs", reservedSystemCPUs)
 
 		kubeReserved, err := parseResourceList(s.KubeReserved)
 		if err != nil {

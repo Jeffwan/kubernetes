@@ -760,15 +760,15 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
 			stDefaultCPUSet: cpuset.NewCPUSet(),
 			expCSet:         cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 		},
-		{
-			description:     "reserved cores 0 & 1 are not present in available cpuset",
-			topo:            topoDualSocketHT,
-			numReservedCPUs: 2,
-			reserved:        cpuset.NewCPUSet(0, 1),
-			stAssignments:   state.ContainerCPUAssignments{},
-			stDefaultCPUSet: cpuset.NewCPUSet(2, 3, 4, 5),
-			expErr:          fmt.Errorf("not all reserved cpus: \"0-1\" are present in defaultCpuSet: \"2-5\""),
-		},
+		//{
+		//	description:     "reserved cores 0 & 1 are not present in available cpuset",
+		//	topo:            topoDualSocketHT,
+		//	numReservedCPUs: 2,
+		//	reserved:        cpuset.NewCPUSet(0, 1),
+		//	stAssignments:   state.ContainerCPUAssignments{},
+		//	stDefaultCPUSet: cpuset.NewCPUSet(2, 3, 4, 5),
+		//	expErr:          fmt.Errorf("not all reserved cpus: \"0-1\" are present in defaultCpuSet: \"2-5\""),
+		//},
 		{
 			description:     "inconsistency between numReservedCPUs and reserved",
 			topo:            topoDualSocketHT,
@@ -777,6 +777,19 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
 			stAssignments:   state.ContainerCPUAssignments{},
 			stDefaultCPUSet: cpuset.NewCPUSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			expNewErr:       fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of 0-1 did not equal 1)"),
+		},
+		{
+			description:     "update reserved resource if there's a conflict",
+			topo:            topoDualSocketHT,
+			numReservedCPUs: 4,
+			reserved:        cpuset.NewCPUSet(0, 1, 2, 3),
+			stAssignments:   state.ContainerCPUAssignments{
+				"fakePod": map[string]cpuset.CPUSet{
+					"fakeContainer1": cpuset.NewCPUSet(2, 3),
+				},
+			},
+			stDefaultCPUSet: cpuset.NewCPUSet(0, 1, 4, 5, 6, 7, 8, 9, 10, 11),
+			expCSet:         cpuset.NewCPUSet(0, 1, 4, 5, 6, 7, 8, 9, 10, 11),
 		},
 	}
 	for _, testCase := range testCases {

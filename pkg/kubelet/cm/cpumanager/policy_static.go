@@ -117,6 +117,7 @@ func NewStaticPolicy(topology *topology.CPUTopology, numReservedCPUs int, reserv
 	}
 
 	klog.InfoS("Static policy created with configuration", "options", opts)
+	klog.InfoS("Static policy created with parameters", "numReservedCPUs", numReservedCPUs, "reservedCPUs", reservedCPUs)
 
 	allCPUs := topology.CPUDetails.CPUs()
 	var reserved cpuset.CPUSet
@@ -128,8 +129,13 @@ func NewStaticPolicy(topology *topology.CPUTopology, numReservedCPUs int, reserv
 		//
 		// For example: Given a system with 8 CPUs available and HT enabled,
 		// if numReservedCPUs=2, then reserved={0,4}
+
+		// TODO: here's the problem, we blindly choose few ones but they may be used by others..
+		// We should choose `numReservedCPUs` from left over ones. However, in-used assignment comes from state.
 		reserved, _ = takeByTopology(topology, opts, allCPUs, numReservedCPUs)
 	}
+
+	klog.InfoS("Static policy created with results", "reserved", reserved)
 
 	if reserved.Size() != numReservedCPUs {
 		err := fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of %s did not equal %d)", reserved, numReservedCPUs)
@@ -163,6 +169,23 @@ func (p *staticPolicy) validateState(s state.State) error {
 	tmpAssignments := s.GetCPUAssignments()
 	tmpDefaultCPUset := s.GetDefaultCPUSet()
 
+	if !p.reserved.Intersection(tmpDefaultCPUset).Equals(p.reserved) && tmpDefaultCPUset.Size() >= p.reserved.Size(){
+		prevReservedCpus := p.reserved.Clone()
+		klog.Warningf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
+			p.reserved.String(), tmpDefaultCPUset.String())
+
+		// Let's try to fix reserved instance.
+		var newReserved []int
+		defaultSlice := tmpDefaultCPUset.ToSlice()
+
+		for i:= 0; i < p.reserved.Size(); i++ {
+			newReserved = append(newReserved, defaultSlice[i])
+		}
+		// TODO: I feel it's not a good practice to modify it in validation phase.
+		p.reserved = cpuset.NewCPUSet(newReserved...)
+		klog.InfoS("Reserved cpus have been changed", "before", prevReservedCpus, "after", p.reserved)
+	}
+
 	// Default cpuset cannot be empty when assignments exist
 	if tmpDefaultCPUset.IsEmpty() {
 		if len(tmpAssignments) != 0 {
@@ -173,6 +196,8 @@ func (p *staticPolicy) validateState(s state.State) error {
 		s.SetDefaultCPUSet(allCPUs)
 		return nil
 	}
+	// TODO: default should be a cpuset with all available ones.
+	klog.InfoS("CPU Validation rules: ", "tmpDefaultCPUSet", tmpDefaultCPUset, "tmpAssignments", tmpAssignments, "reserved", p.reserved, "intersection", p.reserved.Intersection(tmpDefaultCPUset))
 
 	// State has already been initialized from file (is not empty)
 	// 1. Check if the reserved cpuset is not part of default cpuset because:
