@@ -4109,6 +4109,7 @@ var updatablePodSpecFields = []string{
 	"`spec.tolerations` (only additions to existing tolerations)",
 	"`spec.terminationGracePeriodSeconds` (allow it to be set to 1 if it was previously negative)",
 	"`spec.containers[*].resources` (for CPU/memory only)",
+	"`spec.containers[*].resizePolicy`",
 }
 
 //TODO(vinaykul): Drop this var once InPlacePodVerticalScaling goes GA and featuregate is gone.
@@ -4219,7 +4220,21 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 			lim := mungeCpuMemResources(container.Resources.Limits, oldPod.Spec.Containers[ix].Resources.Limits)
 			req := mungeCpuMemResources(container.Resources.Requests, oldPod.Spec.Containers[ix].Resources.Requests)
 			container.Resources = core.ResourceRequirements{Limits: lim, Requests: req}
+
+			// actually, it just set old container's field to mungeContainer for other fields comparision
+			// munge spec.containers[*].resizePolicy
+			//mungeResizePolicy := func(resizePolicies, oldResourcePolicies []core.ContainerResizePolicy) []core.ContainerResizePolicy {
+			//	var mungedResizePolicy []core.ContainerResizePolicy
+			//	if len(oldResourcePolicies) != 0 {
+			//		if len(resizePolicies)
+			//	}
+			//	return mungedResizePolicy
+			//}
+			//container.ResizePolicy = mungeResizePolicy(container.ResizePolicy, oldPod.Spec.Containers[ix].ResizePolicy)
+
+			container.ResizePolicy = oldPod.Spec.Containers[ix].ResizePolicy // +k8s:verify-mutation:reason=clone
 		}
+
 		newContainers = append(newContainers, container)
 	}
 	mungedPodSpec.Containers = newContainers

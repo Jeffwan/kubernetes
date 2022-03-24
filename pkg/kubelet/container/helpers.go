@@ -111,6 +111,8 @@ func HashContainer(container *v1.Container) uint64 {
 		// on policy. So it is excluded from hash.
 		containerCopy := container.DeepCopy()
 		containerCopy.Resources = v1.ResourceRequirements{}
+		// Exclude ResizePolicy as well to make sure the hash value not changed
+		containerCopy.ResizePolicy = []v1.ContainerResizePolicy{}
 		containerJSON, _ = json.Marshal(containerCopy)
 	}
 	hashutil.DeepHashObject(hash, containerJSON)

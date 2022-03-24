@@ -571,6 +571,7 @@ func dropDisabledFields(
 		// Drop ResizePolicy fields. Don't drop updates to Resources field as template.spec.resources
 		// field is mutable for certain controllers. Let ValidatePodUpdate handle it.
 		for i := range podSpec.Containers {
+			// ResizePolicy is the only new added field for this feature gate. We need to drop it if it's disabled or resizePolicy is not being used.
 			podSpec.Containers[i].ResizePolicy = nil
 		}
 	}
