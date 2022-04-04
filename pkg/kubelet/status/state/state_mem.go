@@ -103,6 +103,7 @@ func (s *stateMemory) SetPodResizeStatus(podUID string, resizeStatus v1.PodResiz
 	} else {
 		delete(s.podResizeStatus, podUID)
 	}
+	// TODO: empty resizeStatus means it's being resize successfully in most of the cases.
 	klog.V(3).InfoS("Updated pod resize state", "podUID", podUID, "resizeStatus", resizeStatus)
 	return nil
 }

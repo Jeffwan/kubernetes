@@ -2457,6 +2457,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 
 	kl.podResizeMutex.Lock()
 	defer kl.podResizeMutex.Unlock()
+	// if there's a diff between resource.request and allocation, then it means pod resources are updated.
 	fit, updatedPod, resizeStatus := kl.canResizePod(pod)
 	if fit {
 		// Update pod resource allocation checkpoint
@@ -2466,6 +2467,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 		}
 		*pod = *updatedPod
 	}
+	// TODO: check code here. seems empty comes from here as well.
 	if resizeStatus != "" {
 		// Save resize decision to checkpoint
 		if err := kl.statusManager.SetPodResizeStatus(pod.UID, resizeStatus); err != nil {
@@ -2474,6 +2476,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 		}
 		pod.Status.Resize = resizeStatus
 	}
+	// TODO: should podManager handles in-place?
 	kl.podManager.UpdatePod(pod)
 	kl.statusManager.SetPodStatus(pod, pod.Status)
 	return

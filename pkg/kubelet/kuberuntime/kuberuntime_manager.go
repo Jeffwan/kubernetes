@@ -582,10 +582,12 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 		containerStatus.ID.String() != apiContainerStatus.ContainerID ||
 		len(diff.ObjectDiff(container.Resources, apiContainerStatus.Resources)) == 0 ||
 		len(diff.ObjectDiff(container.Resources.Requests, apiContainerStatus.ResourcesAllocated)) != 0 {
+		klog.Infof("1.Pod %s/%s doesn't need meet resize condition \n", pod.Name, container.Name)
 		return true
 	}
 	// If runtime status resources is available from CRI or previous update, compare with it.
 	if len(diff.ObjectDiff(container.Resources, containerStatus.Resources)) == 0 {
+		klog.Infof("2.Pod(%s) container(%s) resource is exact same as real status, container.resources %v, containerStatus.resources %v \n", container.Resources, containerStatus.Resources)
 		return true
 	}
 	resizePolicy := make(map[v1.ResourceName]v1.ResourceResizePolicy)
@@ -599,6 +601,7 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 		if resizePolicy[rName] == v1.RestartRequired {
 			return true, true
 		}
+		// it's possible we can not find resizePolicy for rName. In that case, by default it's RestartNotRequired.?
 		return true, false
 	}
 	markContainerForUpdate := func(rName ResizeResourceKind, specValue, statusValue int64) {
@@ -640,8 +643,12 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 		}
 		changes.ContainersToStart = append(changes.ContainersToStart, containerIdx)
 		changes.UpdatePodResources = true
+		klog.Info("-----------restart-------------")
+		klog.Info(fmt.Sprintf("Container %s resize requires restart", container.Name),)
+		klog.Info("-----------restart end-------------")
 		return false
 	} else {
+		// TODO: here, if we update resource twice, we append two items?
 		if resizeCPULim {
 			markContainerForUpdate(ResizeCPULimit, desiredLimits.Cpu().MilliValue(), currentLimits.Cpu().MilliValue())
 		}
@@ -651,14 +658,28 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 		if resizeMemLim {
 			markContainerForUpdate(ResizeMemoryLimit, desiredLimits.Memory().Value(), currentLimits.Memory().Value())
 		}
+		klog.Info("-----------containers update-------------")
+		for resizePolicy, containers := range changes.ContainersToUpdate {
+			klog.Infof("changes.ContainersToUpdate %s size %d", resizePolicy, len(containers))
+		}
+		klog.Info("-----------containers update end-------------")
 	}
+
+	fmt.Println("-----------------------")
+	fmt.Printf("podName %v, containerName %v, resizePolicy %v\n", pod.Name, container.Name, container.ResizePolicy)
+	fmt.Printf("resizeCPULim %v, resizeCPUReq %v, resizeMemLim %v\n", resizeCPULim, resizeCPUReq, resizeMemLim)
+	fmt.Printf("restartCPULim %v, restartCPUReq %v, restartMemLim %v\n", restartCPULim, restartCPUReq, restartMemLim)
+	fmt.Println("-----------------------")
+
 	return true
 }
 
+// TODO: my question is I can not figure out pod resource update vs container resource updates..
 func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *kubecontainer.PodStatus, podContainerChanges podActions, result kubecontainer.PodSyncResult) {
 	pcm := m.containerManager.NewPodContainerManager()
 	//TODO(vinaykul): Figure out best way to get enforceMemoryQoS value (parameter #4 below) in platform-agnostic way
 	podResources := cm.ResourceConfigForPod(pod, m.cpuCFSQuota, uint64((m.cpuCFSQuotaPeriod.Duration)/time.Microsecond), false)
+	klog.Infof("doPodResizeAction %s, podResources %v \n", pod.Name, podResources)
 	if podResources == nil {
 		klog.ErrorS(nil, "Unable to get resource configuration", "pod", pod.Name)
 		result.Fail(fmt.Errorf("Unable to get resource configuration processing resize for pod %s", pod.Name))
@@ -684,13 +705,17 @@ func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *ku
 	// If resize results in net pod resource decrease, set pod cgroup config after resizing containers.
 	// If an error occurs at any point, abort. Let future syncpod iterations retry the unfinished stuff.
 	resizeContainers := func(rName ResizeResourceKind, currPodCgValue, newPodCgValue int64) error {
+		klog.Infoln("-----------resizeContainer-------------")
+		klog.Infof("resize Containers resourceName %s, currentValue %v, newValue %v \n", rName, currPodCgValue, newPodCgValue)
 		var err error
+		// TODO: why we don't set it if it's less than.
 		if newPodCgValue > currPodCgValue {
 			if err = setPodCgroupConfig(rName); err != nil {
 				return err
 			}
 		}
 		if len(podContainerChanges.ContainersToUpdate[rName]) > 0 {
+			// TODO: containersToUpdate is pod level or not? Is it possible to have some duplicates?
 			if err = m.updatePodContainerResources(pod, podStatus, rName, podContainerChanges.ContainersToUpdate[rName]); err != nil {
 				klog.ErrorS(err, "updatePodContainerResources failed", "pod", format.Pod(pod), "resource", rName)
 				return err
@@ -726,6 +751,11 @@ func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *ku
 		}
 	}
 	if len(podContainerChanges.ContainersToUpdate[ResizeMemoryLimit]) > 0 || podContainerChanges.UpdatePodResources {
+		if podResources.Memory == nil {
+			klog.Warningf("pod %v, podResource.Memory is nil\n", pod.Name)
+			return
+		}
+
 		currentPodMemoryLimit, err := pcm.GetPodCgroupMemoryConfig(pod)
 		if err != nil {
 			klog.ErrorS(err, "GetPodCgroupMemoryConfig failed", "pod", pod.Name)
@@ -738,7 +768,7 @@ func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *ku
 			result.Fail(err)
 			return
 		}
-		if currentPodMemoryUsage >= uint64(*podResources.Memory) {
+		if currentPodMemoryUsage >= uint64(*podResources.Memory) { // Panic
 			klog.ErrorS(nil, "Aborting attempt to set pod memory limit less than current memory usage", "pod", pod.Name)
 			result.Fail(fmt.Errorf("Aborting attempt to set pod memory limit less than current memory usage for pod %s", pod.Name))
 			return
@@ -990,7 +1020,9 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		var reason containerKillReason
 		restart := shouldRestartOnFailure(pod)
 		if _, _, changed := containerChanged(&container, containerStatus); changed {
+			// TODO: make sure resize policy change won't update the hash. write some tests if there's concern
 			message = fmt.Sprintf("Container %s definition changed", container.Name)
+			klog.Info(message)
 			// Restart regardless of the restart policy because the container
 			// spec changed.
 			restart = true
@@ -1004,6 +1036,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 			reason = reasonStartupProbe
 		} else if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 			if keep := m.computePodResizeAction(pod, idx, containerStatus, &changes); keep {
+				// TODO: resize -> true, restart(kill & start) -> false
 				keepCount++
 			}
 			continue
