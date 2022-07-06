@@ -587,7 +587,7 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 	}
 	// If runtime status resources is available from CRI or previous update, compare with it.
 	if len(diff.ObjectDiff(container.Resources, containerStatus.Resources)) == 0 {
-		klog.Infof("2.Pod(%s) container(%s) resource is exact same as real status, container.resources %v, containerStatus.resources %v \n", container.Resources, containerStatus.Resources)
+		klog.Infof("2.Pod(%s) container(%s) resource is exact same as real status, container.resources %v, containerStatus.resources %v \n", pod.Name, container.Name, container.Resources, containerStatus.Resources)
 		return true
 	}
 	resizePolicy := make(map[v1.ResourceName]v1.ResourceResizePolicy)
@@ -665,11 +665,11 @@ func (m *kubeGenericRuntimeManager) computePodResizeAction(pod *v1.Pod, containe
 		klog.Info("-----------containers update end-------------")
 	}
 
-	fmt.Println("-----------------------")
-	fmt.Printf("podName %v, containerName %v, resizePolicy %v\n", pod.Name, container.Name, container.ResizePolicy)
-	fmt.Printf("resizeCPULim %v, resizeCPUReq %v, resizeMemLim %v\n", resizeCPULim, resizeCPUReq, resizeMemLim)
-	fmt.Printf("restartCPULim %v, restartCPUReq %v, restartMemLim %v\n", restartCPULim, restartCPUReq, restartMemLim)
-	fmt.Println("-----------------------")
+	klog.Infoln("-----------------------")
+	klog.Infof("podName %v, containerName %v, resizePolicy %v\n", pod.Name, container.Name, container.ResizePolicy)
+	klog.Infof("resizeCPULim %v, resizeCPUReq %v, resizeMemLim %v\n", resizeCPULim, resizeCPUReq, resizeMemLim)
+	klog.Infof("restartCPULim %v, restartCPUReq %v, restartMemLim %v\n", restartCPULim, restartCPUReq, restartMemLim)
+	klog.Infoln("-----------------------")
 
 	return true
 }
@@ -868,6 +868,8 @@ func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, pod
 					if apiContainer.Resources.Requests != nil {
 						c.Resources.Requests = apiContainer.Resources.Requests
 					}
+					// continue to next container status to avoid entering follow logics
+					continue
 				}
 				if newContainerStatus.Resources.Limits != nil {
 					c.Resources.Limits = newContainerStatus.Resources.Limits.DeepCopy()

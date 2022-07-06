@@ -1767,6 +1767,19 @@ func (kl *Kubelet) syncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		return nil
 	}
 
+	 if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+		 // Generate final API pod status with pod and status manager status
+		 apiPodStatus := kl.generateAPIPodStatus(pod, podStatus)
+		 // Let's ignore the new created Pods. Otherwise, we will see panic issues.
+		 if len(apiPodStatus.ContainerStatuses) != 0 && apiPodStatus.ContainerStatuses[0].Resources != nil {
+			 // If we come here, containerRuntime.SyncPod() must succeed.  generateAPIPodStatus already help us convert the status.
+			 klog.Infof("container status: cpu %s, memory %s, resizing %s", apiPodStatus.ContainerStatuses[0].Resources.Limits.Cpu(), apiPodStatus.ContainerStatuses[0].Resources.Limits.Memory(), apiPodStatus.Resize)
+			 kl.statusManager.SetPodStatus(pod, apiPodStatus)
+		 } else {
+			 klog.Infof("container apiPodStatus %v", podStatus)
+		 }
+	 }
+
 	return nil
 }
 
