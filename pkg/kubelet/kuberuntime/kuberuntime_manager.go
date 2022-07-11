@@ -716,6 +716,8 @@ func (m *kubeGenericRuntimeManager) doPodResizeAction(pod *v1.Pod, podStatus *ku
 		}
 		if len(podContainerChanges.ContainersToUpdate[rName]) > 0 {
 			// TODO: containersToUpdate is pod level or not? Is it possible to have some duplicates?
+			// It should only update cpu or memory individually, update a time.
+			// Just notice `updatePodContainerResources` doesn't have curValue and newValue?
 			if err = m.updatePodContainerResources(pod, podStatus, rName, podContainerChanges.ContainersToUpdate[rName]); err != nil {
 				klog.ErrorS(err, "updatePodContainerResources failed", "pod", format.Pod(pod), "resource", rName)
 				return err
@@ -800,32 +802,39 @@ func (m *kubeGenericRuntimeManager) updatePodContainerResources(pod *v1.Pod, pod
 		if cInfo.kubeContainerStatus.Resources.Requests != nil {
 			currentRequests = cInfo.kubeContainerStatus.Resources.Requests.DeepCopy()
 		}
+		// Do not repeatedly update resources and external caller didn't consolidate all resource update calls for one container.
+		// Change from `Update` to `Patch` should work on the containerd side. Only if the value is set, then it override the original value.
+		// https://github.com/containerd/containerd/blob/8b9498909dba6dda44fda26d95ef7dbcd1765995/pkg/cri/server/container_update_resources.go#L56
+		// https://github.com/containerd/containerd/blob/8b9498909dba6dda44fda26d95ef7dbcd1765995/pkg/cri/opts/spec_linux.go#L407
 		switch resourceKind {
 		case ResizeCPULimit:
 			container.Resources.Limits = v1.ResourceList{
 				v1.ResourceCPU:    *desiredLimits.Cpu(),
-				v1.ResourceMemory: *currentLimits.Memory(),
+				//v1.ResourceMemory: *currentLimits.Memory(),
 			}
-			containerStatus.ResourcesAllocated = v1.ResourceList{
-				v1.ResourceCPU:    *currentRequests.Cpu(),
-				v1.ResourceMemory: *currentRequests.Memory(),
-			}
+			//containerStatus.ResourcesAllocated = v1.ResourceList{
+			//	v1.ResourceCPU:    *currentRequests.Cpu(),
+			//	v1.ResourceMemory: *currentRequests.Memory(),
+			//}
 		case ResizeCPURequest:
+			// TODO(jiaxin.shan@) limits setting is still a little lit awkward here, but since memory is the critical path and we set it once.
+			// CPU setting here is acceptable, otherwise, currentLimits won't be used.
+			// We should consider to set to desired directly and that's source of truth. No need to care of runtime resources.
 			container.Resources.Limits = v1.ResourceList{
 				v1.ResourceCPU:    *currentLimits.Cpu(),
-				v1.ResourceMemory: *currentLimits.Memory(),
+				//v1.ResourceMemory: *currentLimits.Memory(),
 			}
 			containerStatus.ResourcesAllocated = v1.ResourceList{
 				v1.ResourceCPU:    *desiredRequests.Cpu(),
-				v1.ResourceMemory: *currentRequests.Memory(),
+				//v1.ResourceMemory: *currentRequests.Memory(),
 			}
 		case ResizeMemoryLimit:
 			container.Resources.Limits = v1.ResourceList{
-				v1.ResourceCPU:    *currentLimits.Cpu(),
+				//v1.ResourceCPU:    *currentLimits.Cpu(),
 				v1.ResourceMemory: *desiredLimits.Memory(),
 			}
 			containerStatus.ResourcesAllocated = v1.ResourceList{
-				v1.ResourceCPU:    *currentRequests.Cpu(),
+				//v1.ResourceCPU:    *currentRequests.Cpu(),
 				v1.ResourceMemory: *currentRequests.Memory(),
 			}
 		}
