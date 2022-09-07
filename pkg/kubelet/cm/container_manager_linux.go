@@ -754,6 +754,7 @@ func (m *resourceAllocator) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle
 		}
 
 		if m.cpuManager != nil {
+			klog.V(2).Infoln("Admin pod and allocated resources")
 			err = m.cpuManager.Allocate(pod, &container)
 			if err != nil {
 				return admission.GetPodAdmitResult(err)

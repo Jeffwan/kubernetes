@@ -252,6 +252,7 @@ func (p *staticPolicy) updateCPUsToReuse(pod *v1.Pod, container *v1.Container, c
 }
 
 func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Container) error {
+	klog.V(2).Infoln("static Policy called")
 	if numCPUs := p.guaranteedCPUs(pod, container); numCPUs != 0 {
 		klog.InfoS("Static policy: Allocate", "pod", klog.KObj(pod), "containerName", container.Name)
 		// container belongs in an exclusively allocated pool

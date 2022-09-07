@@ -1996,6 +1996,7 @@ func (kl *Kubelet) canAdmitPod(pods []*v1.Pod, pod *v1.Pod) (bool, string, strin
 		attrs.OtherPods = otherPods
 	}
 	for _, podAdmitHandler := range kl.admitHandlers {
+		klog.V(2).Infof("Check resource admin handler is invoked")
 		if result := podAdmitHandler.Admit(attrs); !result.Admit {
 			return false, result.Reason, result.Message
 		}
