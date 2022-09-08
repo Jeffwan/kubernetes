@@ -252,10 +252,11 @@ func (p *staticPolicy) updateCPUsToReuse(pod *v1.Pod, container *v1.Container, c
 }
 
 func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Container) error {
-	klog.V(2).Infoln("static Policy called")
+	klog.V(2).Infoln("Jiaxin: static Policy called")
 	if numCPUs := p.guaranteedCPUs(pod, container); numCPUs != 0 {
 		klog.InfoS("Static policy: Allocate", "pod", klog.KObj(pod), "containerName", container.Name)
 		// container belongs in an exclusively allocated pool
+		klog.V(2).Infoln("Jiaxin: guaranteedCPUs %v ", numCPUs)
 
 		if p.options.FullPhysicalCPUsOnly && ((numCPUs % p.topology.CPUsPerCore()) != 0) {
 			// Since CPU Manager has been enabled requesting strict SMT alignment, it means a guaranteed pod can only be admitted
@@ -272,7 +273,9 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 				CpusPerCore:   p.topology.CPUsPerCore(),
 			}
 		}
-		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok {
+		// this is the root problem. Because at this moment, it is 2 cpus and kip the update.
+		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok && cpuset.Size() == numCPUs {
+			klog.V(2).Infoln("Jiaxin: updateCPUsToReuse %v ", cpuset)
 			p.updateCPUsToReuse(pod, container, cpuset)
 			klog.InfoS("Static policy: container already present in state, skipping", "pod", klog.KObj(pod), "containerName", container.Name)
 			return nil
@@ -288,6 +291,7 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 			klog.ErrorS(err, "Unable to allocate CPUs", "pod", klog.KObj(pod), "containerName", container.Name, "numCPUs", numCPUs)
 			return err
 		}
+		klog.V(2).Infoln("Jiaxin: cpuset to update %v", cpuset)
 		s.SetCPUSet(string(pod.UID), container.Name, cpuset)
 		p.updateCPUsToReuse(pod, container, cpuset)
 
@@ -354,6 +358,7 @@ func (p *staticPolicy) guaranteedCPUs(pod *v1.Pod, container *v1.Container) int 
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		if _, cs, ok := podutil.GetContainerStatus(pod.Status.ContainerStatuses, container.Name); ok {
 			cpuQuantity = cs.ResourcesAllocated[v1.ResourceCPU]
+			cpuQuantity = container.Resources.Requests[v1.ResourceCPU]
 		}
 	}
 	if cpuQuantity.Value()*1000 != cpuQuantity.MilliValue() {

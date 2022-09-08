@@ -746,6 +746,7 @@ type resourceAllocator struct {
 
 func (m *resourceAllocator) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAdmitResult {
 	pod := attrs.Pod
+	klog.V(2).Infoln("Admin pod and allocated resources - coming")
 
 	for _, container := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
 		err := m.deviceManager.Allocate(pod, &container)
