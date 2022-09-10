@@ -274,7 +274,7 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 			}
 		}
 		// this is the root problem. Because at this moment, it is 2 cpus and kip the update.
-		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok && cpuset.Size() == numCPUs {
+		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok {
 			klog.V(2).Infoln("Jiaxin: updateCPUsToReuse %v ", cpuset)
 			p.updateCPUsToReuse(pod, container, cpuset)
 			klog.InfoS("Static policy: container already present in state, skipping", "pod", klog.KObj(pod), "containerName", container.Name)
@@ -358,7 +358,7 @@ func (p *staticPolicy) guaranteedCPUs(pod *v1.Pod, container *v1.Container) int 
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		if _, cs, ok := podutil.GetContainerStatus(pod.Status.ContainerStatuses, container.Name); ok {
 			cpuQuantity = cs.ResourcesAllocated[v1.ResourceCPU]
-			cpuQuantity = container.Resources.Requests[v1.ResourceCPU]
+			//cpuQuantity = container.Resources.Requests[v1.ResourceCPU]
 		}
 	}
 	if cpuQuantity.Value()*1000 != cpuQuantity.MilliValue() {
