@@ -2460,10 +2460,6 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 			klog.V(3).InfoS("ContainerStatus.ResourcesAllocated length mismatch", "pod", pod.Name, "container", container.Name)
 			break
 		}
-		if len(diff.ObjectDiff(container.Resources.Requests, containerStatus.ResourcesAllocated)) > 0 {
-			podResized = true
-			break
-		}
 
 		if utilfeature.DefaultFeatureGate.Enabled(features.CPUManager) {
 			cpus := kl.containerManager.GetCPUs(string(pod.UID), container.Name)
@@ -2485,11 +2481,17 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 			// containStatus = allocatedResource -> 4. CPUSET != containerStatus.
 			// requeue -> containerStatus -> 4. (same loop or next loop)
 
-			klog.Infoln("------------------------")
-			klog.InfoS("containerStatus", "resourceAllocated", containerStatus.ResourcesAllocated.Cpu().Size())
-			klog.InfoS("kl.containerManager.GetCPUs", "cpus", cpus)
-			klog.Infoln("------------------------")
+			klog.V(2).Infoln("------------------------")
+			klog.V(2).InfoS("jiaxin", "resourceAllocated", containerStatus.ResourcesAllocated.Cpu().Size())
+			klog.V(2).InfoS("jiaxin", "kl.containerManager.GetCPUs", cpus)
+			klog.V(2).Infoln("------------------------")
 		}
+
+		if len(diff.ObjectDiff(container.Resources.Requests, containerStatus.ResourcesAllocated)) > 0 {
+			podResized = true
+			break
+		}
+
 	}
 
 	if !podResized && !cpuSetUpdated{
