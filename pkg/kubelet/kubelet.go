@@ -2446,6 +2446,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 		return
 	}
 	podResized := false
+	cpuSetUpdated := false
 	for _, container := range pod.Spec.Containers {
 		if len(container.Resources.Requests) == 0 {
 			continue
@@ -2463,35 +2464,103 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) {
 			podResized = true
 			break
 		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.CPUManager) {
+			cpus := kl.containerManager.GetCPUs(string(pod.UID), container.Name)
+			if containerStatus.ResourcesAllocated.Cpu().Size() != 0 {
+			}
+
+			if len(cpus) == 0 {
+			}
+
+			// edge case 1: fraction CPUs?
+			// edge case 2:
+			if len(cpus) != containerStatus.ResourcesAllocated.Cpu().Size() {
+				cpuSetUpdated = true
+				break
+			}
+
+			// make sure it's core binding issue first. Only apply to core binding issue
+			// we should compare assigned cpu
+			// containStatus = allocatedResource -> 4. CPUSET != containerStatus.
+			// requeue -> containerStatus -> 4. (same loop or next loop)
+
+			klog.Infoln("------------------------")
+			klog.InfoS("containerStatus", "resourceAllocated", containerStatus.ResourcesAllocated.Cpu().Size())
+			klog.InfoS("kl.containerManager.GetCPUs", "cpus", cpus)
+			klog.Infoln("------------------------")
+		}
 	}
-	if !podResized {
+
+	if !podResized && !cpuSetUpdated{
 		return
 	}
 
-	kl.podResizeMutex.Lock()
-	defer kl.podResizeMutex.Unlock()
-	// if there's a diff between resource.request and allocation, then it means pod resources are updated.
-	fit, updatedPod, resizeStatus := kl.canResizePod(pod)
-	if fit {
-		// Update pod resource allocation checkpoint
-		if err := kl.statusManager.SetPodAllocation(updatedPod); err != nil {
-			//TODO(vinaykul): Can we recover from this in some way? Investigate
-			klog.ErrorS(err, "SetPodAllocation failed", "pod", format.Pod(pod))
+	if cpuSetUpdated {
+		var otherActivePods []*v1.Pod
+		activePods := kl.GetActivePods()
+		for _, p := range activePods {
+			if p.UID != pod.UID {
+				otherActivePods = append(otherActivePods, p)
+			}
 		}
-		*pod = *updatedPod
-	}
-	// TODO: check code here. seems empty comes from here as well.
-	if resizeStatus != "" {
-		// Save resize decision to checkpoint
-		if err := kl.statusManager.SetPodResizeStatus(pod.UID, resizeStatus); err != nil {
-			//TODO(vinaykul): Can we recover from this in some way? Investigate
-			klog.ErrorS(err, "SetPodResizeStatus failed", "pod", format.Pod(pod))
+
+		// Use allocated resources values from checkpoint store (source of truth) to determine fit
+		otherPods := make([]*v1.Pod, 0, len(otherActivePods))
+		checkpointState := kl.statusManager.State()
+		if checkpointState == nil {
+			klog.V(2).Info("Can not fetch checkpoint status from statusManager")
 		}
-		pod.Status.Resize = resizeStatus
+
+		for _, p := range otherActivePods {
+			op := p.DeepCopy()
+			for _, c := range op.Spec.Containers {
+				resourcesAllocated, found := checkpointState.GetContainerResourceAllocation(string(p.UID), c.Name)
+				if c.Resources.Requests != nil && found {
+					c.Resources.Requests[v1.ResourceCPU] = resourcesAllocated[v1.ResourceCPU]
+					c.Resources.Requests[v1.ResourceMemory] = resourcesAllocated[v1.ResourceMemory]
+				}
+			}
+			otherPods = append(otherPods, op)
+		}
+		attrs := &lifecycle.PodAdmitAttributes{Pod: pod, OtherPods: otherPods}
+
+		// containerManager.cpuManager.Allocate(pod, container)
+		result := kl.containerManager.GetAllocateResourcesPodAdmitHandler().Admit(attrs)
+		 // ok, failReason, failMessage
+		if !result.Admit {
+			// Log reason and return. Let the next sync iteration retry the resize
+			klog.V(2).InfoS("CPUSET allocation is not working", "Pod", pod.Name, "Reason", result.Reason, "Message", result.Message)
+		}
 	}
-	// TODO: should podManager handles in-place?
-	kl.podManager.UpdatePod(pod)
-	kl.statusManager.SetPodStatus(pod, pod.Status)
+
+	if podResized {
+		kl.podResizeMutex.Lock()
+		defer kl.podResizeMutex.Unlock()
+		// if there's a diff between resource.request and allocation, then it means pod resources are updated.
+		fit, updatedPod, resizeStatus := kl.canResizePod(pod)
+		if fit {
+			// Update pod resource allocation checkpoint
+			if err := kl.statusManager.SetPodAllocation(updatedPod); err != nil {
+				//TODO(vinaykul): Can we recover from this in some way? Investigate
+				klog.ErrorS(err, "SetPodAllocation failed", "pod", format.Pod(pod))
+			}
+			*pod = *updatedPod
+		}
+		// TODO: check code here. seems empty comes from here as well.
+		if resizeStatus != "" {
+			// Save resize decision to checkpoint
+			if err := kl.statusManager.SetPodResizeStatus(pod.UID, resizeStatus); err != nil {
+				//TODO(vinaykul): Can we recover from this in some way? Investigate
+				klog.ErrorS(err, "SetPodResizeStatus failed", "pod", format.Pod(pod))
+			}
+			pod.Status.Resize = resizeStatus
+		}
+		// TODO: should podManager handles in-place?
+		kl.podManager.UpdatePod(pod)
+		kl.statusManager.SetPodStatus(pod, pod.Status)
+	}
+
 	return
 }
 
