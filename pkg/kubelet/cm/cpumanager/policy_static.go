@@ -271,7 +271,8 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 				CpusPerCore:   p.topology.CPUsPerCore(),
 			}
 		}
-		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok {
+		// double check cpuset size. If not equal, policy needs to update the CPUs to use.
+		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok && cpuset.Size() == numCPUs {
 			p.updateCPUsToReuse(pod, container, cpuset)
 			klog.InfoS("Static policy: container already present in state, skipping", "pod", klog.KObj(pod), "containerName", container.Name)
 			return nil
@@ -353,6 +354,9 @@ func (p *staticPolicy) guaranteedCPUs(pod *v1.Pod, container *v1.Container) int 
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		if _, cs, ok := podutil.GetContainerStatus(pod.Status.ContainerStatuses, container.Name); ok {
 			cpuQuantity = cs.ResourcesAllocated[v1.ResourceCPU]
+			// Get request value (desired) to avoid additional loop
+			// This should be safe and it's only invoked when there's a resource change.
+			cpuQuantity = container.Resources.Requests[v1.ResourceCPU]
 		}
 	}
 	if cpuQuantity.Value()*1000 != cpuQuantity.MilliValue() {
