@@ -254,8 +254,9 @@ func (p *staticPolicy) updateCPUsToReuse(pod *v1.Pod, container *v1.Container, c
 func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Container) error {
 	if numCPUs := p.guaranteedCPUs(pod, container); numCPUs != 0 {
 		klog.InfoS("Static policy: Allocate", "pod", klog.KObj(pod), "containerName", container.Name)
+		klog.InfoS("Static policy:", "full-pcpus-only", p.options.FullPhysicalCPUsOnly, "distribute-cpus-across-numa", p.options.DistributeCPUsAcrossNUMA,
+			"spread-pcpus-preferred", p.options.SpreadPhysicalCPUsPreferredOption)
 		// container belongs in an exclusively allocated pool
-
 		if p.options.FullPhysicalCPUsOnly && ((numCPUs % p.topology.CPUsPerCore()) != 0) {
 			// Since CPU Manager has been enabled requesting strict SMT alignment, it means a guaranteed pod can only be admitted
 			// if the CPU requested is a multiple of the number of virtual cpus per physical cores.
@@ -284,7 +285,7 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 		klog.InfoS("Topology Affinity", "pod", klog.KObj(pod), "containerName", container.Name, "affinity", hint)
 
 		// Allocate CPUs according to the NUMA affinity contained in the hint.
-		// Before we allocate new CPUs, let's merge the existing CPUs assigned to the node.
+		// Before we allocate new CPUs, let's merge the existing CPUs assigned to the pod.
 		cpuset, err := p.allocateCPUs(s, numCPUs, hint.NUMANodeAffinity, p.cpusToReuse[string(pod.UID)].Union(oldCpuset))
 		klog.Infof("pod %s container %s, old cpus %v, new cpus %v", pod.Name, container.Name, oldCpuset, cpuset)
 		if err != nil {
@@ -292,22 +293,25 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 			return err
 		}
 
-
-		// scale up and scale down behavior is a little bit different
+		// scale up and scale down behavior is a little bit different.
 		// scale up:
 		// old   defaultcpu reuse  ->  new     -> default -> add back or not.
 		// [0,1] [3,4,5,6]         -> [3,4,5]  -> [6]     -> [0, 1, 6]
-		// [0,1] [3,4,5,6] + [0,1] -> [0,1,3]  -> [4,5,6] -> do not backfill. if old can be found in new
+		// [0,1] [3,4,5,6] + [0,1] -> [0,1,3]  -> [4,5,6] -> do not backfillCpuSet. if old can be found in new
 		// [0,1] [3,4,5,6] + [0,1] -> [0,3,4]  -> [1,5,6] -> [0,1,5,6]  # 0 should not be added.
 
 		// scale down:
 		// old     defaultcpu reuse  ->  new     -> default   -> add back or not.
 		// [0,1,2] [4,5,6]           -> [4,5]    -> [6]       -> [0,1,2,6]
-		// [0,1,2] [4,5,6] + [0,1,2] -> [0,1]    -> [2,4,5,6] -> do not backfill # if new can be found in old.
+		// [0,1,2] [4,5,6] + [0,1,2] -> [0,1]    -> [2,4,5,6] -> need to backfillCpuSet 2.
 		// [0,1,2] [4,5,6] + [0,1,2] -> [0,4]    -> [1,2,5,6] -> [0,1,2,5,6] # 0 should not be added
 
-		// oldCPUse could be larger or smaller. - need to consider this case.
-		//s.SetDefaultCPUSet(s.GetDefaultCPUSet().Difference(oldCpuset))
+		// oldCPUset not exists in cpuset should be backfilled.
+		backfillCpuSet := oldCpuset.Filter(func(cpu int) bool {
+			return !cpuset.Contains(cpu)
+		})
+		// add back backfillCPUBuilder.Result() result.
+		s.SetDefaultCPUSet(s.GetDefaultCPUSet().Difference(cpuset).Union(backfillCpuSet))
 
 		s.SetCPUSet(string(pod.UID), container.Name, cpuset)
 		p.updateCPUsToReuse(pod, container, cpuset)
