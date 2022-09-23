@@ -1860,14 +1860,20 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 				// Read ResourcesAllocated from checkpoint. It is the source-of-truth.
 				found := false
 				checkpointState := kl.statusManager.State()
-				status.ResourcesAllocated, found = checkpointState.GetContainerResourceAllocation(string(pod.UID), cName)
-				if !(container.Resources.Requests == nil && container.Resources.Limits == nil) && !found {
-					// Log error and fallback to ResourcesAllocated in oldStatus if it exists
-					klog.ErrorS(nil, "resource allocation not found in checkpoint store", "pod", pod.Name, "container", cName)
-					if oldStatusFound {
-						status.ResourcesAllocated = oldStatus.ResourcesAllocated
+				// checkpointState could be empty in some cases. We need to validate the state before using it.
+				if checkpointState != nil {
+					status.ResourcesAllocated, found = checkpointState.GetContainerResourceAllocation(string(pod.UID), cName)
+					if !(container.Resources.Requests == nil && container.Resources.Limits == nil) && !found {
+						// Log error and fallback to ResourcesAllocated in oldStatus if it exists
+						klog.ErrorS(nil, "resource allocation not found in checkpoint store", "pod", pod.Name, "container", cName)
+						if oldStatusFound {
+							status.ResourcesAllocated = oldStatus.ResourcesAllocated
+						}
 					}
+				} else {
+					klog.ErrorS(nil, "failed to get checkpoint store", "pod", pod.Name, "container", cName)
 				}
+
 				if oldStatus.Resources == nil {
 					oldStatus.Resources = &v1.ResourceRequirements{}
 				}

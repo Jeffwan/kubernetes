@@ -272,8 +272,9 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 			}
 		}
 		// double check cpuset size. If not equal, policy needs to update the CPUs to use.
-		if cpuset, ok := s.GetCPUSet(string(pod.UID), container.Name); ok && cpuset.Size() == numCPUs {
-			p.updateCPUsToReuse(pod, container, cpuset)
+		oldCpuset, ok := s.GetCPUSet(string(pod.UID), container.Name)
+		if ok && oldCpuset.Size() == numCPUs {
+			p.updateCPUsToReuse(pod, container, oldCpuset)
 			klog.InfoS("Static policy: container already present in state, skipping", "pod", klog.KObj(pod), "containerName", container.Name)
 			return nil
 		}
@@ -283,11 +284,31 @@ func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Contai
 		klog.InfoS("Topology Affinity", "pod", klog.KObj(pod), "containerName", container.Name, "affinity", hint)
 
 		// Allocate CPUs according to the NUMA affinity contained in the hint.
-		cpuset, err := p.allocateCPUs(s, numCPUs, hint.NUMANodeAffinity, p.cpusToReuse[string(pod.UID)])
+		// Before we allocate new CPUs, let's merge the existing CPUs assigned to the node.
+		cpuset, err := p.allocateCPUs(s, numCPUs, hint.NUMANodeAffinity, p.cpusToReuse[string(pod.UID)].Union(oldCpuset))
+		klog.Infof("pod %s container %s, old cpus %v, new cpus %v", pod.Name, container.Name, oldCpuset, cpuset)
 		if err != nil {
 			klog.ErrorS(err, "Unable to allocate CPUs", "pod", klog.KObj(pod), "containerName", container.Name, "numCPUs", numCPUs)
 			return err
 		}
+
+
+		// scale up and scale down behavior is a little bit different
+		// scale up:
+		// old   defaultcpu reuse  ->  new     -> default -> add back or not.
+		// [0,1] [3,4,5,6]         -> [3,4,5]  -> [6]     -> [0, 1, 6]
+		// [0,1] [3,4,5,6] + [0,1] -> [0,1,3]  -> [4,5,6] -> do not backfill. if old can be found in new
+		// [0,1] [3,4,5,6] + [0,1] -> [0,3,4]  -> [1,5,6] -> [0,1,5,6]  # 0 should not be added.
+
+		// scale down:
+		// old     defaultcpu reuse  ->  new     -> default   -> add back or not.
+		// [0,1,2] [4,5,6]           -> [4,5]    -> [6]       -> [0,1,2,6]
+		// [0,1,2] [4,5,6] + [0,1,2] -> [0,1]    -> [2,4,5,6] -> do not backfill # if new can be found in old.
+		// [0,1,2] [4,5,6] + [0,1,2] -> [0,4]    -> [1,2,5,6] -> [0,1,2,5,6] # 0 should not be added
+
+		// oldCPUse could be larger or smaller. - need to consider this case.
+		//s.SetDefaultCPUSet(s.GetDefaultCPUSet().Difference(oldCpuset))
+
 		s.SetCPUSet(string(pod.UID), container.Name, cpuset)
 		p.updateCPUsToReuse(pod, container, cpuset)
 
