@@ -29,15 +29,17 @@ import (
 
 // Names of the options, as part of the user interface.
 const (
-	FullPCPUsOnlyOption            string = "full-pcpus-only"
-	DistributeCPUsAcrossNUMAOption string = "distribute-cpus-across-numa"
-	AlignBySocketOption            string = "align-by-socket"
+	FullPCPUsOnlyOption               string = "full-pcpus-only"
+	DistributeCPUsAcrossNUMAOption    string = "distribute-cpus-across-numa"
+	AlignBySocketOption               string = "align-by-socket"
+	SpreadPhysicalCPUsPreferredOption string = "spread-pcpus-preferred"
 )
 
 var (
 	alphaOptions = sets.New[string](
 		DistributeCPUsAcrossNUMAOption,
 		AlignBySocketOption,
+		SpreadPhysicalCPUsPreferredOption,
 	)
 	betaOptions = sets.New[string](
 		FullPCPUsOnlyOption,
@@ -80,6 +82,10 @@ type StaticPolicyOptions struct {
 	// Flag to ensure CPUs are considered aligned at socket boundary rather than
 	// NUMA boundary
 	AlignBySocket bool
+	// flag to enable extra allocation restrictions to spread
+	// cpus (HT) on different physical core.
+	// This is a preferred policy so do not throw error if they have to packed in one physical core.
+	SpreadPhysicalCPUsPreferredOption bool
 }
 
 // NewStaticPolicyOptions creates a StaticPolicyOptions struct from the user configuration.
@@ -109,6 +115,13 @@ func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOption
 				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
 			}
 			opts.AlignBySocket = optValue
+		case SpreadPhysicalCPUsPreferredOption:
+			optValue, err := strconv.ParseBool(value)
+			if err != nil {
+				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
+			}
+			opts.SpreadPhysicalCPUsPreferredOption = optValue
+
 		default:
 			// this should never be reached, we already detect unknown options,
 			// but we keep it as further safety.
