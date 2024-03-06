@@ -114,7 +114,7 @@ func TestCPUAccumulatorFreeSockets(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
 			result := acc.freeSockets()
 			sort.Ints(result)
 			if !reflect.DeepEqual(result, tc.expect) {
@@ -214,7 +214,7 @@ func TestCPUAccumulatorFreeNUMANodes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
 			result := acc.freeNUMANodes()
 			if !reflect.DeepEqual(result, tc.expect) {
 				t.Errorf("expected %v to equal %v", result, tc.expect)
@@ -263,7 +263,7 @@ func TestCPUAccumulatorFreeSocketsAndNUMANodes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
 			resultNUMANodes := acc.freeNUMANodes()
 			if !reflect.DeepEqual(resultNUMANodes, tc.expectNUMANodes) {
 				t.Errorf("expected NUMA Nodes %v to equal %v", resultNUMANodes, tc.expectNUMANodes)
@@ -335,7 +335,7 @@ func TestCPUAccumulatorFreeCores(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
 			result := acc.freeCores()
 			if !reflect.DeepEqual(result, tc.expect) {
 				t.Errorf("expected %v to equal %v", result, tc.expect)
@@ -391,7 +391,7 @@ func TestCPUAccumulatorFreeCPUs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
 			result := acc.freeCPUs()
 			if !reflect.DeepEqual(result, tc.expect) {
 				t.Errorf("expected %v to equal %v", result, tc.expect)
@@ -477,7 +477,7 @@ func TestCPUAccumulatorTake(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, tc.numCPUs)
+			acc := newCPUAccumulator(tc.topo, tc.availableCPUs, tc.numCPUs, CPUSortingStrategyPacked)
 			totalTaken := 0
 			for _, cpus := range tc.takeCPUs {
 				acc.take(cpus)
@@ -655,7 +655,9 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			result, err := takeByTopologyNUMAPacked(tc.topo, tc.availableCPUs, tc.numCPUs)
+			// use default sorting strategy
+			strategy := CPUSortingStrategyPacked
+			result, err := takeByTopologyNUMAPacked(tc.topo, tc.availableCPUs, tc.numCPUs, strategy)
 			if tc.expErr != "" && err != nil && err.Error() != tc.expErr {
 				t.Errorf("expected error to be [%v] but it was [%v]", tc.expErr, err)
 			}
@@ -663,6 +665,106 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 				t.Errorf("expected result [%s] to equal [%s]", result, tc.expResult)
 			}
 		})
+	}
+}
+
+func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
+	testCases := []struct {
+		description   string
+		topo          *topology.CPUTopology
+		opts          StaticPolicyOptions
+		availableCPUs cpuset.CPUSet
+		numCPUs       int
+		expErr        string
+		expResult     cpuset.CPUSet
+	}{
+		{
+			"take a socket of cpus from single socket with HT, 3 cpus",
+			topoSingleSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
+			3,
+			"",
+			cpuset.New(0, 1, 2),
+		},
+		{
+			"take a socket of cpus from dual socket with HT, 2 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			2,
+			"",
+			cpuset.New(0, 2),
+		},
+		{
+			"take a socket of cpus from dual socket with HT, 3 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			3,
+			"",
+			cpuset.New(0, 2, 4),
+		},
+		{
+			"take a socket of cpus from dual socket with HT, 6 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			6,
+			"",
+			cpuset.New(0, 2, 4, 6, 8, 10),
+		},
+		{
+			"take cpus from dual socket with HT, 8 cpus",
+			topoDualSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+			8,
+			"",
+			cpuset.New(0, 2, 4, 6, 8, 10, 1, 3),
+		},
+		{
+			"take a socket of cpus from dual socket without HT, 2 cpus",
+			topoDualSocketNoHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
+			2,
+			"",
+			cpuset.New(0, 1),
+		},
+		{
+			// SpreadPhysicalCPUsPreferred doesn't care socket and numa ranking. such setting in test is transparent.
+			"take a socket of cpus from dual socket with multi numa per socket and HT, 12 cpus",
+			topoDualSocketMultiNumaPerSocketHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			mustParseCPUSet(t, "0-79"),
+			8,
+			"",
+			mustParseCPUSet(t, "0-7"),
+		},
+		{
+			"take a socket of cpus from quad socket four way with HT, 12 cpus",
+			topoQuadSocketFourWayHT,
+			StaticPolicyOptions{SpreadPhysicalCPUsPreferred: true},
+			mustParseCPUSet(t, "0-287"),
+			12,
+			"",
+			mustParseCPUSet(t, "0-2,9-10,13-14,21-22,25-26,33"),
+		},
+	}
+
+	for _, tc := range testCases {
+		strategy := CPUSortingStrategyPacked
+		if tc.opts.SpreadPhysicalCPUsPreferred {
+			strategy = CPUSortingStrategySpread
+		}
+		result, err := takeByTopologyNUMAPacked(tc.topo, tc.availableCPUs, tc.numCPUs, strategy)
+		if tc.expErr != "" && err.Error() != tc.expErr {
+			t.Errorf("testCase %q failed, expected error to be [%v] but it was [%v]", tc.description, tc.expErr, err)
+		}
+		if !result.Equals(tc.expResult) {
+			t.Errorf("testCase %q failed, expected result [%s] to equal [%s]", tc.description, result, tc.expResult)
+		}
 	}
 }
 
@@ -858,7 +960,7 @@ func TestTakeByTopologyNUMADistributed(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			result, err := takeByTopologyNUMADistributed(tc.topo, tc.availableCPUs, tc.numCPUs, tc.cpuGroupSize)
+			result, err := takeByTopologyNUMADistributed(tc.topo, tc.availableCPUs, tc.numCPUs, tc.cpuGroupSize, CPUSortingStrategyPacked)
 			if err != nil {
 				if tc.expErr == "" {
 					t.Errorf("unexpected error [%v]", err)
