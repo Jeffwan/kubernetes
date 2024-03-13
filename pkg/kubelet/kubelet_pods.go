@@ -1709,7 +1709,6 @@ func deleteCustomResourceFromResourceRequirements(target *v1.ResourceRequirement
 }
 
 func (kl *Kubelet) determinePodResizeStatus(pod *v1.Pod, podStatus *v1.PodStatus) v1.PodResizeStatus {
-	var podResizeStatus v1.PodResizeStatus
 	specStatusDiffer := false
 	for _, c := range pod.Spec.Containers {
 		if cs, ok := podutil.GetContainerStatus(podStatus.ContainerStatuses, c.Name); ok {
@@ -1729,12 +1728,10 @@ func (kl *Kubelet) determinePodResizeStatus(pod *v1.Pod, podStatus *v1.PodStatus
 		if err := kl.statusManager.SetPodResizeStatus(pod.UID, ""); err != nil {
 			klog.ErrorS(err, "SetPodResizeStatus failed", "pod", pod.Name)
 		}
-	} else {
-		if resizeStatus, found := kl.statusManager.GetPodResizeStatus(string(pod.UID)); found {
-			podResizeStatus = resizeStatus
-		}
+		return ""
 	}
-	return podResizeStatus
+	// TODO: print status here. it might be different from resource difference??
+	return pod.Status.Resize
 }
 
 // generateAPIPodStatus creates the final API pod status for a pod, given the
@@ -1750,6 +1747,8 @@ func (kl *Kubelet) generateAPIPodStatus(pod *v1.Pod, podStatus *kubecontainer.Po
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		s.Resize = kl.determinePodResizeStatus(pod, s)
 	}
+	// TODO: I think even previous one has the resize, convert function doesn't copy. it get the status separately.
+	klog.V(3).InfoS("Pod Resize Status", "pod.status.resize", pod.Status.Resize, "oldpod.status.resize", oldPodStatus.Resize, "result status", s.Resize)
 	// calculate the next phase and preserve reason
 	allStatus := append(append([]v1.ContainerStatus{}, s.ContainerStatuses...), s.InitContainerStatuses...)
 	s.Phase = getPhase(pod, allStatus, podIsTerminal)

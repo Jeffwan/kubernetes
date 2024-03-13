@@ -1812,6 +1812,7 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		metrics.PodStartDuration.Observe(metrics.SinceInSeconds(firstSeenTime))
 	}
 
+	klog.V(2).InfoS("statusManager.SetPodStatus", "pod.status", pod.Status)
 	kl.statusManager.SetPodStatus(pod, apiPodStatus)
 
 	// Pods that are not runnable must be stopped - return a typed error to the pod worker
@@ -1963,7 +1964,7 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		// TODO(vinaykul,InPlacePodVerticalScaling): Investigate doing this in HandlePodUpdates + periodic SyncLoop scan
 		//     See: https://github.com/kubernetes/kubernetes/pull/102884#discussion_r663160060
 		if kl.podWorkers.CouldHaveRunningContainers(pod.UID) && !kubetypes.IsStaticPod(pod) {
-			pod = kl.handlePodResourcesResize(pod)
+			pod = kl.handlePodResourcesResize(pod, &apiPodStatus)
 		}
 	}
 
@@ -1987,15 +1988,6 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		}
 
 		return false, nil
-	}
-
-	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) && isPodResizeInProgress(pod, &apiPodStatus) {
-		// While resize is in progress, periodically call PLEG to update pod cache
-		runningPod := kubecontainer.ConvertPodStatusToRunningPod(kl.getRuntime().Type(), podStatus)
-		if err, _ := kl.pleg.UpdateCache(&runningPod, pod.UID); err != nil {
-			klog.ErrorS(err, "Failed to update pod cache", "pod", klog.KObj(pod))
-			return false, err
-		}
 	}
 
 	return false, nil
@@ -2811,7 +2803,7 @@ func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, *v1.Pod, v1.PodResizeStatus)
 	return true, podCopy, v1.PodResizeStatusInProgress
 }
 
-func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
+func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod, podStatus *v1.PodStatus) *v1.Pod {
 	if pod.Status.Phase != v1.PodRunning {
 		return pod
 	}
@@ -2820,7 +2812,9 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
 		if len(container.Resources.Requests) == 0 {
 			continue
 		}
-		containerStatus, found := podutil.GetContainerStatus(pod.Status.ContainerStatuses, container.Name)
+		// here we keep same logic to check container's CRI status (like isPodResizeInProgress does)
+		// to avoid any status inconsistency between apiserver and cri
+		containerStatus, found := podutil.GetContainerStatus(podStatus.ContainerStatuses, container.Name)
 		if !found {
 			klog.V(5).InfoS("ContainerStatus not found", "pod", pod.Name, "container", container.Name)
 			break
@@ -2830,6 +2824,10 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
 			break
 		}
 		if !cmp.Equal(container.Resources.Requests, containerStatus.AllocatedResources) {
+			podResized = true
+			break
+		}
+		if podStatus.Resize == v1.PodResizeStatusProposed {
 			podResized = true
 			break
 		}

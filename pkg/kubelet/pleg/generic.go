@@ -233,7 +233,7 @@ func (g *GenericPLEG) Relist() {
 	}()
 
 	// Get all the pods.
-	podList, err := g.runtime.GetPods(ctx, true)
+	podList, err := g.runtime.GetPods(ctx, false)
 	if err != nil {
 		klog.ErrorS(err, "GenericPLEG: Unable to retrieve pods")
 		return
@@ -245,16 +245,31 @@ func (g *GenericPLEG) Relist() {
 	// update running pod and container count
 	updateRunningPodAndContainerMetrics(pods)
 	g.podRecords.setCurrent(pods)
+	klog.V(3).InfoS("1. PLEG podRecords", "podRecords", g.podRecords)
 
 	// Compare the old and the current pods, and generate events.
 	eventsByPodID := map[types.UID][]*PodLifecycleEvent{}
 	for pid := range g.podRecords {
 		oldPod := g.podRecords.getOld(pid)
 		pod := g.podRecords.getCurrent(pid)
+		cachePodStatus, err := g.cache.Get(pid)
+		if err != nil {
+			klog.ErrorS(err, "GenericPLEG: Unable to retrieve pods")
+			return
+		}
+		var podStatus *kubecontainer.PodStatus
+		if pod != nil {
+			podStatus, err = g.runtime.GetPodStatus(ctx, pod.ID, pod.Name, pod.Namespace)
+			if err != nil {
+				klog.ErrorS(err, "GenericPLEG: Unable to retrieve pod status", "pod", pod.ID)
+				continue
+			}
+		}
+
 		// Get all containers in the old and the new pod.
 		allContainers := getContainersFromPods(oldPod, pod)
 		for _, container := range allContainers {
-			events := computeEvents(oldPod, pod, &container.ID)
+			events := computeEvents(oldPod, pod, cachePodStatus, podStatus, &container.ID)
 			for _, e := range events {
 				updateEvents(eventsByPodID, e)
 			}
@@ -268,6 +283,7 @@ func (g *GenericPLEG) Relist() {
 
 	// If there are events associated with a pod, we should update the
 	// podCache.
+	klog.V(3).InfoS("2. PLEG eventsByPodID", "length", len(eventsByPodID), "eventsByPodID", eventsByPodID)
 	for pid, events := range eventsByPodID {
 		pod := g.podRecords.getCurrent(pid)
 		if g.cacheEnabled() {
@@ -306,10 +322,15 @@ func (g *GenericPLEG) Relist() {
 		// Map from containerId to exit code; used as a temporary cache for lookup
 		containerExitCode := make(map[string]int)
 
+		klog.V(3).InfoS("3. PLEG: loop the events", "length", len(events))
 		for i := range events {
 			// Filter out events that are not reliable and no other components use yet.
 			if events[i].Type == ContainerChanged {
-				continue
+				klog.V(2).InfoS("1. container change event triggered", "event.podid", events[i].ID, "event.type", events[i].Type)
+				// for in-place pod, we can not continue, make it pass through the eventChannel
+				if !utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+					continue
+				}
 			}
 			select {
 			case g.eventChannel <- events[i]:
@@ -386,7 +407,7 @@ func getContainersFromPods(pods ...*kubecontainer.Pod) []*kubecontainer.Containe
 	return containers
 }
 
-func computeEvents(oldPod, newPod *kubecontainer.Pod, cid *kubecontainer.ContainerID) []*PodLifecycleEvent {
+func computeEvents(oldPod, newPod *kubecontainer.Pod, cachedPodStatus, podStatus *kubecontainer.PodStatus, cid *kubecontainer.ContainerID) []*PodLifecycleEvent {
 	var pid types.UID
 	if oldPod != nil {
 		pid = oldPod.ID
@@ -395,7 +416,32 @@ func computeEvents(oldPod, newPod *kubecontainer.Pod, cid *kubecontainer.Contain
 	}
 	oldState := getContainerState(oldPod, cid)
 	newState := getContainerState(newPod, cid)
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) && oldPod != nil && newPod != nil && cachedPodStatus != nil && podStatus != nil {
+		oldContainerStatus := cachedPodStatus.FindContainerStatusByContainerId(cid)
+		newContainerStatus := podStatus.FindContainerStatusByContainerId(cid)
+		if oldContainerStatus != nil && newContainerStatus != nil && !containerResourceSame(oldContainerStatus.Resources, newContainerStatus.Resources) {
+			klog.V(3).InfoS("in-place pod update compute events", "oldContainerStatus", oldContainerStatus, "newContainerStatus", newContainerStatus)
+			return generateEvents(pid, cid.ID, oldState, plegContainerUnknown)
+		}
+	}
+
 	return generateEvents(pid, cid.ID, oldState, newState)
+}
+
+// TODO: use more elegant way to compare the resources
+func containerResourceSame(r1 *kubecontainer.ContainerResources, r2 *kubecontainer.ContainerResources) bool {
+	if r1 == nil && r2 == nil {
+		return true
+	}
+
+	cpuRequestsSame := (r1.CPURequest == nil && r2.CPURequest == nil) || (r1.CPURequest != nil && r2.CPURequest != nil && r1.CPURequest.Equal(*r2.CPURequest))
+	cpuLimitsSame := (r1.CPULimit == nil && r2.CPULimit == nil) || (r1.CPULimit != nil && r2.CPULimit != nil && r1.CPULimit.Equal(*r2.CPULimit))
+	memoryRequestsSame := (r1.MemoryRequest == nil && r2.MemoryRequest == nil) || (r1.MemoryRequest != nil && r2.MemoryRequest != nil && r1.MemoryRequest.Equal(*r2.MemoryRequest))
+	memoryLimitsSame := (r1.MemoryLimit == nil && r2.MemoryLimit == nil) || (r1.MemoryLimit != nil && r2.MemoryLimit != nil && r1.MemoryLimit.Equal(*r2.MemoryLimit))
+
+	// The container resources are the same only if all attributes are the same
+	return cpuRequestsSame && cpuLimitsSame && memoryRequestsSame && memoryLimitsSame
 }
 
 func (g *GenericPLEG) cacheEnabled() bool {
