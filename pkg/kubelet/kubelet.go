@@ -1964,7 +1964,7 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		// TODO(vinaykul,InPlacePodVerticalScaling): Investigate doing this in HandlePodUpdates + periodic SyncLoop scan
 		//     See: https://github.com/kubernetes/kubernetes/pull/102884#discussion_r663160060
 		if kl.podWorkers.CouldHaveRunningContainers(pod.UID) && !kubetypes.IsStaticPod(pod) {
-			pod = kl.handlePodResourcesResize(pod, &apiPodStatus)
+			pod = kl.handlePodResourcesResize(pod)
 		}
 	}
 
@@ -2803,7 +2803,7 @@ func (kl *Kubelet) canResizePod(pod *v1.Pod) (bool, *v1.Pod, v1.PodResizeStatus)
 	return true, podCopy, v1.PodResizeStatusInProgress
 }
 
-func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod, podStatus *v1.PodStatus) *v1.Pod {
+func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
 	if pod.Status.Phase != v1.PodRunning {
 		return pod
 	}
@@ -2814,7 +2814,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod, podStatus *v1.PodStatus
 		}
 		// here we keep same logic to check container's CRI status (like isPodResizeInProgress does)
 		// to avoid any status inconsistency between apiserver and cri
-		containerStatus, found := podutil.GetContainerStatus(podStatus.ContainerStatuses, container.Name)
+		containerStatus, found := podutil.GetContainerStatus(pod.Status.ContainerStatuses, container.Name)
 		if !found {
 			klog.V(5).InfoS("ContainerStatus not found", "pod", pod.Name, "container", container.Name)
 			break
@@ -2824,10 +2824,6 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod, podStatus *v1.PodStatus
 			break
 		}
 		if !cmp.Equal(container.Resources.Requests, containerStatus.AllocatedResources) {
-			podResized = true
-			break
-		}
-		if podStatus.Resize == v1.PodResizeStatusProposed {
 			podResized = true
 			break
 		}
