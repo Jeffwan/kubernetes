@@ -1709,6 +1709,7 @@ func deleteCustomResourceFromResourceRequirements(target *v1.ResourceRequirement
 }
 
 func (kl *Kubelet) determinePodResizeStatus(pod *v1.Pod, podStatus *v1.PodStatus) v1.PodResizeStatus {
+	var podResizeStatus v1.PodResizeStatus
 	specStatusDiffer := false
 	for _, c := range pod.Spec.Containers {
 		if cs, ok := podutil.GetContainerStatus(podStatus.ContainerStatuses, c.Name); ok {
@@ -1728,10 +1729,12 @@ func (kl *Kubelet) determinePodResizeStatus(pod *v1.Pod, podStatus *v1.PodStatus
 		if err := kl.statusManager.SetPodResizeStatus(pod.UID, ""); err != nil {
 			klog.ErrorS(err, "SetPodResizeStatus failed", "pod", pod.Name)
 		}
-		return ""
+	} else {
+		if resizeStatus, found := kl.statusManager.GetPodResizeStatus(string(pod.UID)); found {
+			podResizeStatus = resizeStatus
+		}
 	}
-	// TODO: print status here. it might be different from resource difference??
-	return pod.Status.Resize
+	return podResizeStatus
 }
 
 // generateAPIPodStatus creates the final API pod status for a pod, given the
